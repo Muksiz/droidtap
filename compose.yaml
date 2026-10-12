@@ -1,0 +1,69 @@
+name: droidtap
+
+services:
+  # Loads the KVM kernel driver on hosts where nothing else does: Docker
+  # Desktop's WSL 2 VM forgets it on every restart. It needs host privileges
+  # for that one command and exits immediately when /dev/kvm already exists.
+  kvm:
+    image: alpine:3
+    privileged: true
+    pid: host
+    network_mode: none
+    security_opt:
+      - label=disable
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - |
+        [ -e /dev/kvm ] && exit 0
+        module=kvm_intel
+        grep -qw svm /proc/cpuinfo && module=kvm_amd
+        echo "Loading $$module on the Docker host"
+        nsenter -t 1 -m -u -n -i modprobe "$$module"
+        nsenter -t 1 -m test -e /dev/kvm && exit 0
+        echo "ERROR: could not create /dev/kvm. See README.md, 'Troubleshooting'." >&2
+        exit 1
+
+  # The Android emulator, shown in a browser desktop. It has no sound device.
+  emulator:
+    build: emulator
+    depends_on:
+      kvm:
+        condition: service_completed_successfully
+    image: droidtap-emulator
+    container_name: droidtap-emulator
+    init: true
+    devices:
+      - /dev/kvm
+    security_opt:
+      - label=disable # only matters on SELinux hosts (Fedora); ignored elsewhere
+    shm_size: 2gb
+    stop_grace_period: 45s
+    ports:
+      - "127.0.0.1:6080:6080" # noVNC desktop: http://localhost:6080
+    environment: # override any of these in a .env file next to this one
+      SCREEN: ${SCREEN:-1280x900x24} # width x height x colour depth of the browser desktop
+      EMULATOR_RAM_MB: ${EMULATOR_RAM_MB:-4096}
+      EMULATOR_CORES: ${EMULATOR_CORES:-8}
+      EMULATOR_DATA_SIZE: ${EMULATOR_DATA_SIZE:-16G} # only applied when the Android device is first created
+    volumes:
+      - avd:/home/droid/.android # the Android device (apps, logins, downloads)
+
+  # droidtap itself. Not started by "compose up"; run it for each recording:
+  #   docker compose --profile record run --rm recorder [name]
+  recorder:
+    build: .
+    image: droidtap-recorder
+    profiles: [record]
+    environment:
+      DROIDTAP_ADB: emulator:5037 # the adb server in the emulator container
+    init: true
+    stop_signal: SIGINT
+    security_opt:
+      - label=disable
+    volumes:
+      - ./recordings:/recordings
+
+volumes:
+  avd:

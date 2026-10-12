@@ -1,0 +1,50 @@
+#!/bin/bash
+set -euo pipefail
+
+AVD=droid
+AVD_DIR="$ANDROID_AVD_HOME/$AVD.avd"
+CONFIG="$AVD_DIR/config.ini"
+
+set_ini() {
+    if grep -q "^$1=" "$CONFIG"; then
+        sed -i "s|^$1=.*|$1=$2|" "$CONFIG"
+    else
+        echo "$1=$2" >> "$CONFIG"
+    fi
+}
+
+if [ ! -f "$CONFIG" ]; then
+    echo "Creating AVD '$AVD' from $ANDROID_IMAGE"
+    echo no | avdmanager create avd -n "$AVD" -k "$ANDROID_IMAGE" -d pixel_6
+    set_ini PlayStore.enabled true
+    set_ini hw.keyboard yes
+    set_ini hw.audioInput no
+    set_ini hw.audioOutput yes
+    set_ini showDeviceFrame no
+    set_ini disk.dataPartition.size "$EMULATOR_DATA_SIZE"
+    # A small screen keeps software rendering cheap; audio is what matters here.
+    set_ini hw.lcd.width 720
+    set_ini hw.lcd.height 1280
+    set_ini hw.lcd.density 320
+fi
+
+# Lock files survive an unclean stop and make the emulator refuse to start.
+rm -rf "$AVD_DIR"/*.lock
+
+# The recorder container talks to this adb server, so it must listen on the
+# compose network (-a) and not only on localhost. The port is not published.
+adb -a start-server
+
+# The emulator's own sound output goes nowhere: the container has no audio
+# device, and droidtap captures the audio inside Android instead.
+export QEMU_AUDIO_DRV=none
+# -feature -PlayStoreImage only removes the "Google Play" page from the
+# emulator's settings window; the Play Store inside Android is unaffected.
+# With the page present the emulator runs "adb shell dumpsys package ..."
+# every 10 seconds, and forking a process of several GB freezes it for
+# 100-200 ms each time.
+exec emulator -avd "$AVD" \
+    -memory "$EMULATOR_RAM_MB" -cores "$EMULATOR_CORES" \
+    -gpu swangle_indirect \
+    -feature -PlayStoreImage \
+    -no-snapshot -no-boot-anim -no-metrics

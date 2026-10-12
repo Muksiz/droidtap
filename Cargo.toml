@@ -1,0 +1,11 @@
+[package]
+name = "droidtap"
+version = "0.1.0"
+edition = "2024"
+description = "Records an Android device's audio to a WAV file without touching the computer's sound"
+
+[dependencies]
+ctrlc = { version = "3", features = ["termination"] }
+
+[profile.release]
+strip = true

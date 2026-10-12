@@ -1,0 +1,7 @@
+#!/bin/bash
+# The adb server and its keys belong to droid. Without this, "docker exec ...
+# adb" would run as root and could start a root-owned server first.
+if [ "$(id -u)" = 0 ]; then
+    exec setpriv --reuid droid --regid droid --init-groups "$ADB" "$@"
+fi
+exec "$ADB" "$@"

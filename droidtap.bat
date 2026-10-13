@@ -344,11 +344,27 @@ echo Install Docker Desktop or Podman Desktop first.
 exit /b 1
 :check_engine
 %ENGINE% info >nul 2>&1
-if errorlevel 1 (
-    echo %S_RED%%ENGINE% is installed but not running.%S_OFF% Start it first.
-    exit /b 1
-)
-exit /b 0
+if not errorlevel 1 exit /b 0
+if "%ENGINE%"=="docker" if exist "%ProgramFiles%\Docker\Docker\Docker Desktop.exe" goto start_docker
+echo %S_RED%%ENGINE% is installed but not running.%S_OFF% Start it first.
+exit /b 1
+
+rem Starts Docker Desktop and waits for it, three minutes at most.
+:start_docker
+<nul set /p "=Docker is not running. Starting Docker Desktop, this can take a minute"
+start "" "%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
+set /a TRIES=0
+:start_docker_wait
+rem Waits three seconds; "timeout" refuses to run without a keyboard.
+ping -n 4 127.0.0.1 >nul
+docker info >nul 2>&1
+if not errorlevel 1 echo. & exit /b 0
+<nul set /p "=."
+set /a TRIES+=1
+if %TRIES% lss 60 goto start_docker_wait
+echo.
+echo %S_RED%Docker did not start.%S_OFF% Start Docker Desktop yourself and try again.
+exit /b 1
 
 :android_running
 set "RUNNING="

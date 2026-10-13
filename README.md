@@ -35,7 +35,8 @@ Needs Docker or Podman with compose, and `/dev/kvm`.
 
 `./droidtap.sh` without a command shows a menu with the same choices, plus
 `status`; before a recording it asks for the name and for stereo or mono. On
-Windows, `droidtap.bat` does the same; double-click it for the menu.
+Windows, `droidtap.bat` does the same; double-click it for the menu. It starts
+Docker Desktop first if that is not running.
 
 `listen` needs `ffplay`, which comes with [FFmpeg](https://ffmpeg.org) (on
 Windows: `winget install Gyan.FFmpeg`). Instead of installing it you can put
@@ -63,6 +64,75 @@ Settings (`SCREEN`, `EMULATOR_SCALE`, `EMULATOR_RAM_MB`, `EMULATOR_CORES`,
 room for; `EMULATOR_SCALE` is its size in percent of the Android screen
 instead.
 
+### On Windows 11 with Docker Desktop
+
+Needs:
+
+- Windows 11 on an x86-64 (Intel/AMD) machine with virtualization enabled in
+  the BIOS/UEFI. Windows on ARM is not supported.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) using the
+  **WSL 2** backend (Settings → General → "Use the WSL 2 based engine").
+- [Git for Windows](https://git-scm.com/download/win).
+- About 15 GB of free disk space and 8 GB of RAM available to WSL.
+
+```powershell
+git clone https://github.com/Muksiz/droidtap.git
+cd droidtap
+.\droidtap.bat start
+```
+
+The first start downloads the Android system image and takes a while; the
+resulting image is several GB. Later starts take seconds. For a desktop icon,
+right-click `droidtap.bat` → Show more options → Send to → Desktop (create
+shortcut).
+
+The emulator needs `/dev/kvm`, which WSL 2 provides through nested
+virtualization. Recent WSL kernels (6.x) ship the KVM driver as a module that
+is not loaded automatically and is forgotten on every restart of WSL, Docker
+Desktop or Windows. `droidtap` therefore loads it for you: starting Android
+first runs a small helper container (`kvm`) that does so.
+
+If the start ends with `service "kvm" didn't complete successfully` or with
+`error gathering device information while adding custom device "/dev/kvm"`,
+first try loading the driver by hand:
+
+```powershell
+wsl -d docker-desktop sh -c "modprobe kvm_amd; ls -l /dev/kvm"
+```
+
+Use `kvm_intel` instead of `kvm_amd` on an Intel CPU. If this prints a line
+starting with `crw`, start Android again.
+
+If `modprobe` fails, nested virtualization is not enabled yet:
+
+1. Open the WSL settings file:
+
+   ```powershell
+   notepad $env:USERPROFILE\.wslconfig
+   ```
+
+   and make it contain (answer "Yes" if Notepad asks to create the file):
+
+   ```ini
+   [wsl2]
+   nestedVirtualization=true
+   ```
+
+2. Update and restart WSL. Run these as two separate commands:
+
+   ```powershell
+   wsl --update
+   ```
+
+   ```powershell
+   wsl --shutdown
+   ```
+
+3. Quit Docker Desktop completely (tray icon → Quit Docker Desktop) and start
+   Android again; `droidtap.bat` starts Docker Desktop for you.
+
+Still failing? See [Troubleshooting](#troubleshooting).
+
 ## With a real phone, or without containers
 
 `droidtap` is a single program for Linux and Windows. It needs a running adb
@@ -76,6 +146,68 @@ cargo build --release
 ```
 
 See `droidtap --help` for the options.
+
+## Troubleshooting
+
+**`/dev/kvm` is still missing on Windows**
+Run these one at a time and compare:
+
+```powershell
+wsl --version
+```
+
+The WSL version should be 2.x and the kernel 5.15 or newer. If the command is
+not recognised or reports an old version, install the current WSL from the
+Microsoft Store or with `wsl --update`.
+
+```powershell
+wsl -l -v
+```
+
+`docker-desktop` must be listed with VERSION 2. If it is missing, Docker
+Desktop is using Hyper-V instead: enable Settings → General → "Use the WSL 2
+based engine".
+
+```powershell
+wsl -d docker-desktop ls -l /dev/kvm
+```
+
+If this prints `No such file or directory`, the WSL virtual machine itself has
+no KVM. Find out why with:
+
+```powershell
+wsl -d docker-desktop sh -c "uname -r; grep -cE 'vmx|svm' /proc/cpuinfo; dmesg | grep -i kvm"
+```
+
+```powershell
+Get-Content $env:USERPROFILE\.wslconfig
+```
+
+```powershell
+(Get-CimInstance Win32_Processor).Name
+```
+
+The first command prints the kernel version and then a count. A count of `0`
+means nested virtualization is not reaching WSL: `.wslconfig` is not being
+picked up, or the CPU, firmware or Windows setup does not offer it. A count
+above 0 without `/dev/kvm` points at an outdated WSL kernel (`wsl --update`).
+
+Then check that:
+
+- virtualization (Intel VT-x / AMD-V, sometimes "SVM") is enabled in the
+  BIOS/UEFI — Task Manager → Performance → CPU shows "Virtualization: Enabled";
+- the "Virtual Machine Platform" Windows feature is on (`optionalfeatures.exe`);
+- `.wslconfig` is saved as `%UserProfile%\.wslconfig`, not `.wslconfig.txt`;
+- Windows is not itself running inside a virtual machine (nested
+  virtualization is then usually unavailable);
+- on AMD CPUs, the CPU is a Ryzen/EPYC.
+
+**Seeing what is going on**
+
+```powershell
+docker compose logs -f
+docker exec droidtap-emulator adb devices
+```
 
 ## Notes
 

@@ -6,9 +6,10 @@
 //! recording and the recording cannot be heard on, or disturb, the computer.
 
 mod adb;
+mod screen;
 mod wav;
 
-use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
+use std::io::{self, BufRead, BufReader, Read};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -17,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use adb::Adb;
+use screen::{Screen, note, warn};
 use wav::Wav;
 
 /// Must match the scrcpy-server file in use; the server refuses other clients.
@@ -129,7 +131,7 @@ fn main() -> ExitCode {
     match parse_args().and_then(|opts| run(opts).map_err(|e| e.to_string())) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("droidtap: {message}");
+            screen::error(&format!("droidtap: {message}"));
             ExitCode::FAILURE
         }
     }
@@ -184,19 +186,19 @@ fn run(opts: Options) -> io::Result<()> {
         let server_gone = server_gone.clone();
         std::thread::spawn(move || {
             for line in log.lines().map_while(Result::ok) {
-                note(&format!("[android] {line}"));
+                screen::detail(&format!("[android] {line}"));
             }
             server_gone.store(true, Ordering::Relaxed);
         });
     }
 
     let Some(mut audio) = connect_audio(&adb, scid, &server_gone, &stop)? else {
-        return finish(wav, &path, 0);
+        return finish(wav, &path, 0, 0);
     };
     audio.set_read_timeout(Some(Duration::from_millis(250)))?;
     let mut codec = [0u8; 4];
     if !read_full(&mut audio, &mut codec, &stop)? {
-        return finish(wav, &path, 0);
+        return finish(wav, &path, 0, 0);
     }
     match u32::from_be_bytes(codec) {
         CODEC_RAW => {}
@@ -214,18 +216,15 @@ fn run(opts: Options) -> io::Result<()> {
 
     let mut payload = Vec::new();
     if opts.source == "output" && !raise_volume(&adb, &mut audio, &mut payload, &stop)? {
-        return finish(wav, &path, 0);
+        return finish(wav, &path, 0, 0);
     }
 
     note(&format!(
         "Recording to {} - press Ctrl+C to stop",
         path.display()
     ));
-    let live = io::stderr().is_terminal();
-    let status_interval = Duration::from_millis(if live { 500 } else { 60_000 });
-    let mut last_status = Instant::now();
+    let mut screen = Screen::start(format!("{name}.wav"));
     let mut last_sync = Instant::now();
-    let mut peak = 0u16;
     let mut expected_pts = None;
     let mut gaps = 0u32;
     while let Some(pts_and_flags) = read_packet(&mut audio, &mut payload, &stop)? {
@@ -241,6 +240,7 @@ fn run(opts: Options) -> io::Result<()> {
             && pts > expected + GAP_US
         {
             gaps += 1;
+            screen.gap();
             note(&format!(
                 "note: at {} Android delivered no audio for {} ms",
                 clock(wav.frames()),
@@ -250,28 +250,18 @@ fn run(opts: Options) -> io::Result<()> {
         expected_pts = Some(pts + payload.len() as u64 / wav::FRAME * 1_000_000 / wav::RATE as u64);
 
         wav.write(&payload)?;
-        peak = peak.max(peak_of(&payload));
+        screen.audio(&payload, wav.frames());
         if last_sync.elapsed() >= SYNC_INTERVAL {
             wav.sync()?;
             last_sync = Instant::now();
         }
-        if last_status.elapsed() >= status_interval {
-            let status = format!("  {}  level {}", clock(wav.frames()), level(peak));
-            if live {
-                eprint!("\r{status:<40}");
-                io::stderr().flush()?;
-            } else {
-                eprintln!("{status}");
-            }
-            peak = 0;
-            last_status = Instant::now();
-        }
     }
 
+    let peak = screen.close();
     if !stop.load(Ordering::Relaxed) {
         note("Android closed the audio stream.");
     }
-    finish(wav, &path, gaps)
+    finish(wav, &path, gaps, peak)
 }
 
 /// Waits until a device is connected and Android has finished starting.
@@ -294,7 +284,7 @@ fn wait_for_device(adb: &Adb, timeout: u64, stop: &AtomicBool) -> io::Result<boo
             )));
         }
         if problem != shown {
-            eprintln!("Waiting for the Android device: {problem}");
+            note(&format!("Waiting for the Android device: {problem}"));
             shown = problem;
         }
         std::thread::sleep(Duration::from_secs(1));
@@ -376,12 +366,12 @@ fn raise_volume(
                 ));
             }
         }
-        [_, after, max] if max > 0 => note(&format!(
+        [_, after, max] if max > 0 => warn(&format!(
             "warning: Android's media volume is {after} of {max} and could not be changed. \
              The recording will be quieter and noisier than the original; raise the \
              media volume on the device to its maximum while this is running."
         )),
-        _ => note(&format!(
+        _ => warn(&format!(
             "warning: could not check Android's media volume ({}). If the recording is \
              quiet, raise the media volume on the device to its maximum while this is running.",
             output.lines().next().unwrap_or("no answer").trim()
@@ -436,13 +426,20 @@ fn read_full(stream: &mut TcpStream, buf: &mut [u8], stop: &AtomicBool) -> io::R
     Ok(true)
 }
 
-fn finish(mut wav: Wav, path: &std::path::Path, gaps: u32) -> io::Result<()> {
+/// `peak` is the highest sample of the recording.
+fn finish(mut wav: Wav, path: &std::path::Path, gaps: u32, peak: u16) -> io::Result<()> {
     wav.sync()?;
-    note(&format!(
-        "Saved {} ({})",
-        path.display(),
-        clock(wav.frames())
-    ));
+    let frames = wav.frames();
+    let mut facts = clock(frames);
+    if frames > 0 {
+        facts.push_str(&format!(", {}, ", size(frames)));
+        if peak == 0 {
+            facts.push_str("silent");
+        } else {
+            facts.push_str(&format!("peak {}", screen::level(peak).trim_start()));
+        }
+    }
+    screen::success(&format!("Saved {} ({facts})", path.display()));
     if gaps > 0 {
         note(&format!(
             "{gaps} interruption(s) were noted above. Pauses in playback are harmless; \
@@ -450,28 +447,6 @@ fn finish(mut wav: Wav, path: &std::path::Path, gaps: u32) -> io::Result<()> {
         ));
     }
     Ok(())
-}
-
-/// Prints a full line, overwriting the status line if there is one.
-fn note(message: &str) {
-    eprintln!("\r{message:<40}");
-}
-
-fn peak_of(pcm: &[u8]) -> u16 {
-    pcm.as_chunks::<2>()
-        .0
-        .iter()
-        .map(|sample| i16::from_le_bytes(*sample).unsigned_abs())
-        .max()
-        .unwrap_or(0)
-}
-
-fn level(peak: u16) -> String {
-    if peak == 0 {
-        "silent".into()
-    } else {
-        format!("{:.0} dB", 20.0 * (peak as f64 / 32768.0).log10())
-    }
 }
 
 fn clock(frames: u64) -> String {
@@ -482,6 +457,16 @@ fn clock(frames: u64) -> String {
         seconds / 60 % 60,
         seconds % 60
     )
+}
+
+/// The size of a recording of that many frames, without its header.
+fn size(frames: u64) -> String {
+    let megabytes = (frames * wav::FRAME) as f64 / 1e6;
+    if megabytes < 1000.0 {
+        format!("{megabytes:.1} MB")
+    } else {
+        format!("{:.2} GB", megabytes / 1000.0)
+    }
 }
 
 fn since_epoch() -> Duration {

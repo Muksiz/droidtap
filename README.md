@@ -17,7 +17,7 @@ Android mixer ──► scrcpy-server (on the device) ──► adb ──► dr
 No sound device of the computer is ever opened. The computer's own audio
 cannot end up in a recording, and a recording cannot be heard on the computer
 or change its volume or devices. You therefore cannot listen live: watch the
-level `droidtap` prints and check the file afterwards.
+level meters `droidtap` shows and check the file afterwards.
 
 ## With the bundled emulator (containers)
 

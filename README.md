@@ -14,10 +14,10 @@ server program and reaches `droidtap` through adb, as a network stream:
 Android mixer ──► scrcpy-server (on the device) ──► adb ──► droidtap ──► recordings/name.wav
 ```
 
-No sound device of the computer is ever opened. The computer's own audio
-cannot end up in a recording, and a recording cannot be heard on the computer
-or change its volume or devices. You therefore cannot listen live: watch the
-level meters `droidtap` shows and check the file afterwards.
+`droidtap` never opens a sound device of the computer. The computer's own
+audio cannot end up in a recording, and recording cannot change the computer's
+volume or devices. Watch the level meters `droidtap` shows, or listen to the
+file while it is being written (see `listen` below).
 
 ## With the bundled emulator (containers)
 
@@ -26,6 +26,7 @@ Needs Docker or Podman with compose, and `/dev/kvm`.
 ```sh
 ./droidtap.sh start            # opens Android in a browser desktop (http://localhost:6080), starting it if needed
 ./droidtap.sh record my-book   # records until Ctrl+C -> recordings/my-book.wav
+./droidtap.sh listen           # in a second terminal: plays the recording being made
 ./droidtap.sh recordings       # opens the recordings folder
 ./droidtap.sh stop             # Android, its apps and logins are kept
 ./droidtap.sh update           # git pull, rebuild the containers
@@ -34,6 +35,12 @@ Needs Docker or Podman with compose, and `/dev/kvm`.
 `./droidtap.sh` without a command shows a menu with the same choices, plus
 `status`. On Windows, `droidtap.bat` does the same; double-click it for the
 menu.
+
+`listen` needs `ffplay`, which comes with [FFmpeg](https://ffmpeg.org) (on
+Windows: `winget install Gyan.FFmpeg`). It plays the newest recording, or the
+one named, from a second before its end and follows the file as it grows. It
+only reads the file, so the recording is not affected; what you hear is about
+a second behind Android.
 
 Without the script:
 

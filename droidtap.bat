@@ -2,7 +2,7 @@
 rem Starts, stops, records with and updates droidtap on Windows; the
 rem counterpart of droidtap.sh. Without a command (or when double-clicked) it
 rem shows a menu. Usage:
-rem   droidtap.bat [start ^| record [name] ^| recordings ^| stop ^| status ^| update]
+rem   droidtap.bat [start ^| record [name] ^| listen [name] ^| recordings ^| stop ^| status ^| update]
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
@@ -28,8 +28,9 @@ for /f "tokens=2 delims=:." %%c in ('chcp') do set /a "OLDCP=%%c" 2>nul
 if "%OLDCP%"=="0" set "OLDCP="
 chcp 65001 >nul
 
-rem The one command that works without a container engine.
+rem The commands that work without a container engine.
 if /i "%~1"=="recordings" call :recordings & goto quit
+if /i "%~1"=="listen" call :listen "%~2" & goto quit
 
 call :find_engine
 if not errorlevel 1 goto dispatch
@@ -45,7 +46,7 @@ if /i "%~1"=="stop" call :stop & goto quit
 if /i "%~1"=="status" call :status & goto quit
 if /i "%~1"=="update" goto update
 if /i "%~1"=="_rebuild" goto rebuild_then
-echo Usage: %~nx0 [start ^| record [name] ^| recordings ^| stop ^| status ^| update]
+echo Usage: %~nx0 [start ^| record [name] ^| listen [name] ^| recordings ^| stop ^| status ^| update]
 set "RC=2"
 goto quit_rc
 
@@ -79,14 +80,14 @@ if defined UP (
     set "ITEM1=Open Android in the browser "
     set "HINT1="
     set "HINT2=until Ctrl+C"
-    set "HINT4=its apps and logins are kept"
+    set "HINT5=its apps and logins are kept"
     set "S_NEED="
 ) else (
     set "STATE=%S_DIM%○ not running%S_OFF%"
     set "ITEM1=Start Android               "
     set "HINT1=and open its screen in the browser"
     set "HINT2=start Android first"
-    set "HINT4=it is not running"
+    set "HINT5=it is not running"
     set "S_NEED=%S_DIM%"
 )
 echo %ESC%[H%EL%
@@ -99,28 +100,30 @@ echo    Recordings   %COUNT% in the folder recordings%EL%
 echo.%EL%
 echo    %S_BOLD%1%S_OFF%  %ITEM1%  %S_DIM%%HINT1%%S_OFF%%EL%
 echo    %S_BOLD%2%S_OFF%  %S_NEED%Record                      %S_OFF%  %S_DIM%%HINT2%%S_OFF%%EL%
-echo    %S_BOLD%3%S_OFF%  Open the recordings folder%EL%
-echo    %S_BOLD%4%S_OFF%  %S_NEED%Stop Android                %S_OFF%  %S_DIM%%HINT4%%S_OFF%%EL%
-echo    %S_BOLD%5%S_OFF%  Status and log%EL%
-echo    %S_BOLD%6%S_OFF%  Update                        %S_DIM%git pull, rebuild the containers%S_OFF%%EL%
+echo    %S_BOLD%3%S_OFF%  Listen to the recording       %S_DIM%while it is being made, with ffplay%S_OFF%%EL%
+echo    %S_BOLD%4%S_OFF%  Open the recordings folder%EL%
+echo    %S_BOLD%5%S_OFF%  %S_NEED%Stop Android                %S_OFF%  %S_DIM%%HINT5%%S_OFF%%EL%
+echo    %S_BOLD%6%S_OFF%  Status and log%EL%
+echo    %S_BOLD%7%S_OFF%  Update                        %S_DIM%git pull, rebuild the containers%S_OFF%%EL%
 echo    %S_BOLD%q%S_OFF%  Quit%EL%
 echo.%EL%
 echo.   !MSG!%EL%
 echo.%EL%
-echo   %S_DIM%Press 1-6, or q to quit%S_OFF%%EL%%ESC%[J
+echo   %S_DIM%Press 1-7, or q to quit%S_OFF%%EL%%ESC%[J
 
 rem "r" is what choice answers by itself after five seconds: draw again.
-choice /c 123456qr /n /t 5 /d r >nul
+choice /c 1234567qr /n /t 5 /d r >nul
 set "PICK=%errorlevel%"
-if "%PICK%"=="8" goto menu_draw
+if "%PICK%"=="9" goto menu_draw
 set "MSG="
 if "%PICK%"=="1" goto menu_start
 if "%PICK%"=="2" goto menu_record
-if "%PICK%"=="3" goto menu_recordings
-if "%PICK%"=="4" goto menu_stop
-if "%PICK%"=="5" goto menu_status
-if "%PICK%"=="6" goto menu_update
-if "%PICK%"=="7" set "RC=0" & goto quit_rc
+if "%PICK%"=="3" goto menu_listen
+if "%PICK%"=="4" goto menu_recordings
+if "%PICK%"=="5" goto menu_stop
+if "%PICK%"=="6" goto menu_status
+if "%PICK%"=="7" goto menu_update
+if "%PICK%"=="8" set "RC=0" & goto quit_rc
 rem choice cannot work without a keyboard.
 if "%PICK%"=="255" set "RC=1" & goto quit_rc
 goto menu_draw
@@ -140,6 +143,11 @@ goto menu_draw
 :menu_record_now
 cls
 call :record_menu
+goto menu_pause
+
+:menu_listen
+cls
+call :listen ""
 goto menu_pause
 
 :menu_recordings
@@ -216,6 +224,39 @@ if errorlevel 1 (
 )
 %COMPOSE% --profile record run --rm recorder %RECORD_ARGS%
 exit /b
+
+rem Plays a recording while it is being made, from a second before its end, so
+rem that there is always something left to play. The file is only read, which
+rem the recording does not notice. Without a name it is the newest recording.
+:listen
+where ffplay >nul 2>&1
+if errorlevel 1 (
+    echo %S_RED%ffplay was not found.%S_OFF% It comes with FFmpeg. Install that first, for example
+    echo with "winget install Gyan.FFmpeg", and open a new window.
+    exit /b 1
+)
+rem The newest is the one created last: while a file is being written, the
+rem folder's other facts about it are out of date.
+set "LISTEN_FILE="
+if not "%~1"=="" set "LISTEN_FILE=recordings\%~n1.wav"
+if not defined LISTEN_FILE for /f "delims=" %%f in ('dir /b /a:-d /o:d /t:c recordings\*.wav 2^>nul') do set "LISTEN_FILE=recordings\%%f"
+if not defined LISTEN_FILE goto listen_none
+if not exist "!LISTEN_FILE!" goto listen_none
+rem For the same reason the length is asked of the file itself. 192 bytes are
+rem a millisecond of 48 kHz, 16 bit, stereo.
+set "LISTEN_AT="
+for /f "usebackq" %%s in (`powershell -NoProfile -Command "$f = [IO.File]::Open($env:LISTEN_FILE, 'Open', 'Read', 'ReadWrite'); $ms = [Math]::Max(0, [Math]::Floor($f.Length / 192) - 1000); $f.Close(); '{0}.{1:000}' -f [Math]::Floor($ms / 1000), ($ms %% 1000)"`) do set "LISTEN_AT=%%s"
+if not defined LISTEN_AT (
+    echo %S_RED%Could not read%S_OFF% !LISTEN_FILE!
+    exit /b 1
+)
+echo Listening to !LISTEN_FILE!, a second behind - press Ctrl+C to stop
+rem The header's length is out of date, and the file's end is not the end.
+ffplay -nodisp -nostats -loglevel error -probesize 32 -analyzeduration 0 -follow 1 -ignore_length 1 -ss %LISTEN_AT% -i "!LISTEN_FILE!"
+exit /b
+:listen_none
+echo %S_RED%There is no recording to listen to.%S_OFF% Start one first, in another window.
+exit /b 1
 
 :recordings
 echo The recordings are in !CD!\recordings

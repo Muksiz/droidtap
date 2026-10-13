@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts, stops, records with and updates droidtap on Linux or macOS; the
 # counterpart of droidtap.bat. Without a command it shows a menu. Usage:
-#   ./droidtap.sh [start | record [name] | recordings | stop | status | update]
+#   ./droidtap.sh [start | record [name] | listen [name] | recordings | stop | status | update]
 set -u
 cd "$(dirname "$0")"
 self=./$(basename "$0")
@@ -112,6 +112,39 @@ record() {
     "${compose[@]}" --profile record run --rm recorder "$@"
 }
 
+# Plays a recording while it is being made, from a second before its end, so
+# that there is always something left to play. The file is only read, which
+# the recording does not notice. Without a name it is the newest recording.
+listen() {
+    local file='' candidate ms
+    if ! command -v ffplay > /dev/null 2>&1; then
+        bad "ffplay was not found. It comes with FFmpeg: install that first."
+        return 1
+    fi
+    if [ $# -gt 0 ]; then
+        file=recordings/${1%.wav}.wav
+    else
+        for candidate in recordings/*.wav; do
+            if [ -e "$candidate" ] && { [ -z "$file" ] || [ "$candidate" -nt "$file" ]; }; then
+                file=$candidate
+            fi
+        done
+    fi
+    if [ ! -s "$file" ]; then
+        bad "There is no recording to listen to. Start one first, in another terminal."
+        return 1
+    fi
+    # 192 bytes are a millisecond of 48 kHz, 16 bit, stereo.
+    ms=$(($(wc -c < "$file") / 192 - 1000))
+    if [ $ms -lt 0 ]; then
+        ms=0
+    fi
+    echo "Listening to $file, a second behind - press Ctrl+C to stop"
+    # The header's length is out of date, and the file's end is not the end.
+    ffplay -nodisp -nostats -loglevel error -probesize 32 -analyzeduration 0 \
+        -follow 1 -ignore_length 1 -ss "$((ms / 1000)).$(printf '%03d' $((ms % 1000)))" -i "$file"
+}
+
 recordings() {
     echo "The recordings are in $PWD/recordings"
     open_with_desktop "$PWD/recordings"
@@ -192,10 +225,11 @@ look() {
 
 # The entries: what each one says, depending on what was found.
 entries() {
-    keys=(1 2 3 4 5 6 q)
+    keys=(1 2 3 4 5 6 7 q)
     labels=(
         "Start Android"
         "Record"
+        "Listen to the recording"
         "Open the recordings folder"
         "Stop Android"
         "Status and log"
@@ -205,6 +239,7 @@ entries() {
     hints=(
         "and open its screen in the browser"
         "start Android first"
+        "while it is being made, with ffplay"
         ""
         "it is not running"
         ""
@@ -215,7 +250,7 @@ entries() {
         labels[0]="Open Android in the browser"
         hints[0]=""
         hints[1]="until Ctrl+C"
-        hints[3]="its apps and logins are kept"
+        hints[4]="its apps and logins are kept"
     fi
 }
 
@@ -232,10 +267,10 @@ draw_menu() {
         screen+="   Android      ${faint}○ not running${off}$el"
     fi
     screen+="   Recordings   $recorded in ./recordings$el$el"
-    for i in 0 1 2 3 4 5 6; do
+    for i in 0 1 2 3 4 5 6 7; do
         # Recording and stopping need a running Android.
         dim=''
-        if ! $running && { [ $i -eq 1 ] || [ $i -eq 3 ]; }; then
+        if ! $running && { [ $i -eq 1 ] || [ $i -eq 4 ]; }; then
             dim=$faint
         fi
         if [ $i -eq "$selected" ]; then
@@ -246,7 +281,7 @@ draw_menu() {
         screen+="  ${faint}${hints[i]}${off}$el"
     done
     screen+="$el   $message$el$el"
-    screen+="  ${faint}↑↓ move · enter choose · 1-6 or q directly${off}$el"
+    screen+="  ${faint}↑↓ move · enter choose · 1-7 or q directly${off}$el"
     printf '%s\033[J' "$screen"
 }
 
@@ -282,10 +317,19 @@ choose() {
             fi
             ;;
         3)
+            leave_menu
+            # Ctrl+C ends the listening, not this menu.
+            trap : INT
+            listen
+            trap 'exit 130' INT
+            pause
+            enter_menu
+            ;;
+        4)
             recordings > /dev/null
             message="${green}✓${off} Opened $PWD/recordings"
             ;;
-        4)
+        5)
             leave_menu
             if stop; then
                 message="${green}✓${off} Android is stopped."
@@ -294,13 +338,13 @@ choose() {
             fi
             enter_menu
             ;;
-        5)
+        6)
             leave_menu
             status
             pause
             enter_menu
             ;;
-        6)
+        7)
             # Comes back only if the update failed.
             leave_menu
             update menu
@@ -346,10 +390,10 @@ menu() {
             esac
         fi
         case "$key" in
-            k) selected=$(((selected + 6) % 7)) ;;
-            j) selected=$(((selected + 1) % 7)) ;;
+            k) selected=$(((selected + 7) % 8)) ;;
+            j) selected=$(((selected + 1) % 8)) ;;
             '') choose || break ;;
-            [1-6])
+            [1-7])
                 selected=$((key - 1))
                 choose
                 ;;
@@ -371,7 +415,7 @@ plain_menu() {
         else
             echo "droidtap - Android is not running"
         fi
-        for i in 0 1 2 3 4 5 6; do
+        for i in 0 1 2 3 4 5 6 7; do
             echo "  ${keys[i]}) ${labels[i]}"
         done
         read -r -p "> " choice || break
@@ -385,23 +429,35 @@ plain_menu() {
                 record ${name:+"$name"}
                 trap - INT
                 ;;
-            3) recordings ;;
-            4) stop ;;
-            5) status ;;
-            6) update menu ;;
+            3)
+                trap : INT
+                listen
+                trap - INT
+                ;;
+            4) recordings ;;
+            5) stop ;;
+            6) status ;;
+            7) update menu ;;
             q | Q) break ;;
-            *) echo "Type one of 1-6, or q." ;;
+            *) echo "Type one of 1-7, or q." ;;
         esac
     done
 }
 
 main() {
     styles
-    # The one command that works without a container engine.
-    if [ "${1:-}" = recordings ]; then
-        recordings
-        return
-    fi
+    # The commands that work without a container engine.
+    case "${1:-}" in
+        recordings)
+            recordings
+            return
+            ;;
+        listen)
+            shift
+            listen "$@"
+            return
+            ;;
+    esac
     find_engine
     case "${1:-}" in
         "") menu ;;
@@ -423,7 +479,7 @@ main() {
             fi
             ;;
         *)
-            echo "Usage: $0 [start | record [name] | recordings | stop | status | update]" >&2
+            echo "Usage: $0 [start | record [name] | listen [name] | recordings | stop | status | update]" >&2
             exit 2
             ;;
     esac

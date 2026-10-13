@@ -2,6 +2,7 @@ FROM rust:1-alpine AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src src
+COPY android/volume.dex android/
 RUN cargo build --release --locked
 
 FROM alpine:3

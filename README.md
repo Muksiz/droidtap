@@ -1,7 +1,8 @@
 # droidtap
 
-> **Status:** early. A first end-to-end test on Linux (Podman) produced a
-> recording; audio quality has not been verified yet, and Windows is untested.
+> **Status:** early. Tested on Linux (Podman) with the bundled emulator: test
+> tones were recorded bit for bit, over ten minutes of ordinary computer use
+> and with every processor core busy. Real phones and Windows are untested.
 
 Records what an Android device plays into a WAV file (48 kHz, 16 bit, stereo)
 without touching the computer's sound.
@@ -62,6 +63,12 @@ See `droidtap --help` for the options.
 
 - While recording with the default `--source output`, the device itself is
   silent: Android redirects its output into the capture.
+- With `--source output`, Android applies its media volume to the captured
+  audio. `droidtap` therefore sets that volume to the maximum when a recording
+  starts, which makes the capture an exact copy of what the apps play. Android
+  keeps a separate volume for each output, so the volume of the device's
+  speaker or headphones is not changed. Do not turn the volume down on the
+  device while recording.
 - `droidtap` prints a note whenever Android delivered no audio for more than
   50 ms. Pauses in playback cause these too.
 - The WAV header is rewritten every few seconds, so a recording survives a

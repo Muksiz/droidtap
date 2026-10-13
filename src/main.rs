@@ -23,6 +23,10 @@ use wav::Wav;
 const DEFAULT_SERVER_VERSION: &str = "5.0.1";
 const DEVICE_SERVER_PATH: &str = "/data/local/tmp/droidtap-server.jar";
 
+/// Sets Android's media volume to its maximum; built from android/Volume.java.
+const VOLUME_HELPER: &[u8] = include_bytes!("../android/volume.dex");
+const DEVICE_VOLUME_HELPER_PATH: &str = "/data/local/tmp/droidtap-volume.dex";
+
 // scrcpy's stream format: a 4-byte codec id, then packets made of a 12-byte
 // header (flags and timestamp, payload length; big-endian) and the payload.
 const CODEC_RAW: u32 = 0x0072_6177; // "raw": 48 kHz, 16 bit, stereo PCM
@@ -208,6 +212,11 @@ fn run(opts: Options) -> io::Result<()> {
         }
     }
 
+    let mut payload = Vec::new();
+    if opts.source == "output" && !raise_volume(&adb, &mut audio, &mut payload, &stop)? {
+        return finish(wav, &path, 0);
+    }
+
     note(&format!(
         "Recording to {} - press Ctrl+C to stop",
         path.display()
@@ -219,21 +228,7 @@ fn run(opts: Options) -> io::Result<()> {
     let mut peak = 0u16;
     let mut expected_pts = None;
     let mut gaps = 0u32;
-    let mut payload = Vec::new();
-    loop {
-        let mut header = [0u8; 12];
-        if !read_full(&mut audio, &mut header, &stop)? {
-            break;
-        }
-        let pts_and_flags = u64::from_be_bytes(header[..8].try_into().unwrap());
-        let len = u32::from_be_bytes(header[8..].try_into().unwrap()) as usize;
-        if len > MAX_PACKET {
-            return Err(io::Error::other("the audio stream is corrupt"));
-        }
-        payload.resize(len, 0);
-        if !read_full(&mut audio, &mut payload, &stop)? {
-            break;
-        }
+    while let Some(pts_and_flags) = read_packet(&mut audio, &mut payload, &stop)? {
         if pts_and_flags & FLAG_CONFIG != 0 {
             continue;
         }
@@ -252,7 +247,7 @@ fn run(opts: Options) -> io::Result<()> {
                 (pts - expected) / 1000
             ));
         }
-        expected_pts = Some(pts + len as u64 / wav::FRAME * 1_000_000 / wav::RATE as u64);
+        expected_pts = Some(pts + payload.len() as u64 / wav::FRAME * 1_000_000 / wav::RATE as u64);
 
         wav.write(&payload)?;
         peak = peak.max(peak_of(&payload));
@@ -334,6 +329,87 @@ fn connect_audio(
             Err(_) => std::thread::sleep(Duration::from_millis(100)),
         }
     }
+}
+
+/// With `--source output` Android applies its media volume to the captured
+/// audio, so anything below the maximum costs level and resolution. Sets the
+/// volume to the maximum. Android keeps a separate volume for each output, and
+/// during the capture the output is the capture itself: the volume of the
+/// speaker and of headphones stays as it was.
+///
+/// This takes a second; the audio captured meanwhile is dropped, so that the
+/// level cannot jump inside the file. Returns false when the user asked to
+/// stop or the stream ended.
+fn raise_volume(
+    adb: &Adb,
+    audio: &mut TcpStream,
+    payload: &mut Vec<u8>,
+    stop: &AtomicBool,
+) -> io::Result<bool> {
+    let volume = std::thread::scope(|scope| {
+        let helper = scope.spawn(|| {
+            adb.push(VOLUME_HELPER, DEVICE_VOLUME_HELPER_PATH, 0o100644)?;
+            adb.shell(&format!(
+                "CLASSPATH={DEVICE_VOLUME_HELPER_PATH} app_process / Volume 2>&1"
+            ))
+        });
+        while !helper.is_finished() {
+            if read_packet(audio, payload, stop)?.is_none() {
+                return Ok(None);
+            }
+        }
+        helper.join().unwrap().map(Some)
+    })?;
+    let Some(output) = volume else {
+        return Ok(false);
+    };
+
+    let numbers: Vec<u32> = output
+        .split_whitespace()
+        .map_while(|word| word.parse().ok())
+        .collect();
+    match numbers[..] {
+        [before, after, max] if after == max => {
+            if before != max {
+                note(&format!(
+                    "Android's media volume for captures was {before} of {max}: set it to {max}."
+                ));
+            }
+        }
+        [_, after, max] if max > 0 => note(&format!(
+            "warning: Android's media volume is {after} of {max} and could not be changed. \
+             The recording will be quieter and noisier than the original; raise the \
+             media volume on the device to its maximum while this is running."
+        )),
+        _ => note(&format!(
+            "warning: could not check Android's media volume ({}). If the recording is \
+             quiet, raise the media volume on the device to its maximum while this is running.",
+            output.lines().next().unwrap_or("no answer").trim()
+        )),
+    }
+    Ok(true)
+}
+
+/// Reads one packet into `payload` and returns its flags and timestamp, or
+/// None when the user asked to stop or the stream ended.
+fn read_packet(
+    stream: &mut TcpStream,
+    payload: &mut Vec<u8>,
+    stop: &AtomicBool,
+) -> io::Result<Option<u64>> {
+    let mut header = [0u8; 12];
+    if !read_full(stream, &mut header, stop)? {
+        return Ok(None);
+    }
+    let len = u32::from_be_bytes(header[8..].try_into().unwrap()) as usize;
+    if len > MAX_PACKET {
+        return Err(io::Error::other("the audio stream is corrupt"));
+    }
+    payload.resize(len, 0);
+    if !read_full(stream, payload, stop)? {
+        return Ok(None);
+    }
+    Ok(Some(u64::from_be_bytes(header[..8].try_into().unwrap())))
 }
 
 /// Fills `buf`, looking at the stop flag while waiting. Returns false when

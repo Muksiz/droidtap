@@ -2,7 +2,7 @@
 rem Starts, stops, records with and updates droidtap on Windows; the
 rem counterpart of droidtap.sh. Without a command (or when double-clicked) it
 rem shows a menu. Usage:
-rem   droidtap.bat [start ^| record [name] ^| listen [name] ^| recordings ^| stop ^| status ^| update]
+rem   droidtap.bat [start ^| record [--mono] [name] ^| listen [name] ^| recordings ^| stop ^| status ^| update]
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
@@ -46,7 +46,7 @@ if /i "%~1"=="stop" call :stop & goto quit
 if /i "%~1"=="status" call :status & goto quit
 if /i "%~1"=="update" goto update
 if /i "%~1"=="_rebuild" goto rebuild_then
-echo Usage: %~nx0 [start ^| record [name] ^| listen [name] ^| recordings ^| stop ^| status ^| update]
+echo Usage: %~nx0 [start ^| record [--mono] [name] ^| listen [name] ^| recordings ^| stop ^| status ^| update]
 set "RC=2"
 goto quit_rc
 
@@ -195,7 +195,9 @@ exit /b 1
 set "NAME="
 set /p "NAME=Name of the recording (empty: date and time): "
 set "RECORD_ARGS="
-if defined NAME set RECORD_ARGS="!NAME!"
+choice /c sm /n /m "Stereo or mono (press s or m): "
+if errorlevel 2 set "RECORD_ARGS=--mono"
+if defined NAME set RECORD_ARGS=!RECORD_ARGS! "!NAME!"
 goto record
 
 rem Everything after "record" is passed on to droidtap.
@@ -235,10 +237,11 @@ if not "%~1"=="" set "LISTEN_FILE=recordings\%~n1.wav"
 if not defined LISTEN_FILE for /f "delims=" %%f in ('dir /b /a:-d /o:d /t:c recordings\*.wav 2^>nul') do set "LISTEN_FILE=recordings\%%f"
 if not defined LISTEN_FILE goto listen_none
 if not exist "!LISTEN_FILE!" goto listen_none
-rem For the same reason the length is asked of the file itself. 192 bytes are
-rem a millisecond of 48 kHz, 16 bit, stereo.
+rem For the same reason the length is asked of the file itself. Its 59th byte
+rem is the number of channels, and 96 bytes are a millisecond of one channel
+rem at 48 kHz and 16 bit.
 set "LISTEN_AT="
-for /f "usebackq" %%s in (`powershell -NoProfile -Command "$f = [IO.File]::Open($env:LISTEN_FILE, 'Open', 'Read', 'ReadWrite'); $ms = [Math]::Max(0, [Math]::Floor($f.Length / 192) - 1000); $f.Close(); '{0}.{1:000}' -f [Math]::Floor($ms / 1000), ($ms %% 1000)"`) do set "LISTEN_AT=%%s"
+for /f "usebackq" %%s in (`powershell -NoProfile -Command "$f = [IO.File]::Open($env:LISTEN_FILE, 'Open', 'Read', 'ReadWrite'); $f.Position = 58; $ms = [Math]::Max(0, [Math]::Floor($f.Length / (96 * $f.ReadByte())) - 1000); $f.Close(); '{0}.{1:000}' -f [Math]::Floor($ms / 1000), ($ms %% 1000)"`) do set "LISTEN_AT=%%s"
 if not defined LISTEN_AT (
     echo %S_RED%Could not read%S_OFF% !LISTEN_FILE!
     exit /b 1

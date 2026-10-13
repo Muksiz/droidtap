@@ -32,6 +32,7 @@ const DEVICE_VOLUME_HELPER_PATH: &str = "/data/local/tmp/droidtap-volume.dex";
 // scrcpy's stream format: a 4-byte codec id, then packets made of a 12-byte
 // header (flags and timestamp, payload length; big-endian) and the payload.
 const CODEC_RAW: u32 = 0x0072_6177; // "raw": 48 kHz, 16 bit, stereo PCM
+const STEREO: u16 = 2;
 const FLAG_CONFIG: u64 = 1 << 62;
 const PTS_MASK: u64 = (1 << 61) - 1;
 const MAX_PACKET: usize = 1 << 20;
@@ -41,7 +42,8 @@ const GAP_US: u64 = 50_000;
 const SYNC_INTERVAL: Duration = Duration::from_secs(5);
 
 const HELP: &str = "\
-Records an Android device's audio to a WAV file (48 kHz, 16 bit, stereo).
+Records an Android device's audio to a WAV file (48 kHz, 16 bit, stereo or
+mono).
 Stop with Ctrl+C.
 
 Usage: droidtap [options] [name]
@@ -57,6 +59,8 @@ Options:
                                    goes silent while recording (default)
                          playback: the device keeps playing too (Android 13+);
                                    apps may opt out of being captured
+      --mono             record one channel, the mean of left and right,
+                         instead of stereo
       --wait SECONDS     how long to wait for the device (default: 300)
   -h, --help             show this help
 ";
@@ -69,6 +73,7 @@ struct Options {
     server: PathBuf,
     server_version: String,
     source: String,
+    mono: bool,
     wait: u64,
 }
 
@@ -90,6 +95,7 @@ fn parse_args() -> Result<Options, String> {
         server_version: env("SCRCPY_SERVER_VERSION")
             .unwrap_or_else(|| DEFAULT_SERVER_VERSION.into()),
         source: "output".into(),
+        mono: false,
         wait: 300,
     };
 
@@ -106,6 +112,7 @@ fn parse_args() -> Result<Options, String> {
             "--adb" => opts.adb = value()?,
             "--server" => opts.server = value()?.into(),
             "--source" => opts.source = value()?,
+            "--mono" => opts.mono = true,
             "--wait" => {
                 opts.wait = value()?
                     .parse()
@@ -165,7 +172,7 @@ fn run(opts: Options) -> io::Result<()> {
     std::fs::create_dir_all(&opts.out)?;
     let name = opts.name.clone().unwrap_or_else(default_name);
     let path = opts.out.join(format!("{name}.wav"));
-    let mut wav = Wav::create(&path)
+    let mut wav = Wav::create(&path, if opts.mono { 1 } else { STEREO })
         .map_err(|e| io::Error::new(e.kind(), format!("cannot create {}: {e}", path.display())))?;
 
     adb.push(&server, DEVICE_SERVER_PATH, 0o100644)?;
@@ -223,7 +230,7 @@ fn run(opts: Options) -> io::Result<()> {
         "Recording to {} - press Ctrl+C to stop",
         path.display()
     ));
-    let mut screen = Screen::start(format!("{name}.wav"));
+    let mut screen = Screen::start(format!("{name}.wav"), wav.channels());
     let mut last_sync = Instant::now();
     let mut expected_pts = None;
     let mut gaps = 0u32;
@@ -247,8 +254,12 @@ fn run(opts: Options) -> io::Result<()> {
                 (pts - expected) / 1000
             ));
         }
-        expected_pts = Some(pts + payload.len() as u64 / wav::FRAME * 1_000_000 / wav::RATE as u64);
+        let frames = payload.len() as u64 / wav::frame(STEREO);
+        expected_pts = Some(pts + frames * 1_000_000 / wav::RATE as u64);
 
+        if opts.mono {
+            mix_down(&mut payload);
+        }
         wav.write(&payload)?;
         screen.audio(&payload, wav.frames());
         if last_sync.elapsed() >= SYNC_INTERVAL {
@@ -426,13 +437,25 @@ fn read_full(stream: &mut TcpStream, buf: &mut [u8], stop: &AtomicBool) -> io::R
     Ok(true)
 }
 
+/// Makes stereo audio mono: every frame becomes the mean of its two samples.
+fn mix_down(pcm: &mut Vec<u8>) {
+    let mut len = 0;
+    for at in (0..pcm.len() / 4 * 4).step_by(4) {
+        let sample = |at| i16::from_le_bytes([pcm[at], pcm[at + 1]]) as i32;
+        let mean = ((sample(at) + sample(at + 2)) >> 1) as i16;
+        pcm[len..len + 2].copy_from_slice(&mean.to_le_bytes());
+        len += 2;
+    }
+    pcm.truncate(len);
+}
+
 /// `peak` is the highest sample of the recording.
 fn finish(mut wav: Wav, path: &std::path::Path, gaps: u32, peak: u16) -> io::Result<()> {
     wav.sync()?;
     let frames = wav.frames();
     let mut facts = clock(frames);
     if frames > 0 {
-        facts.push_str(&format!(", {}, ", size(frames)));
+        facts.push_str(&format!(", {}, ", size(frames, wav.channels())));
         if peak == 0 {
             facts.push_str("silent");
         } else {
@@ -460,8 +483,8 @@ fn clock(frames: u64) -> String {
 }
 
 /// The size of a recording of that many frames, without its header.
-fn size(frames: u64) -> String {
-    let megabytes = (frames * wav::FRAME) as f64 / 1e6;
+fn size(frames: u64, channels: u16) -> String {
+    let megabytes = (frames * wav::frame(channels)) as f64 / 1e6;
     if megabytes < 1000.0 {
         format!("{megabytes:.1} MB")
     } else {

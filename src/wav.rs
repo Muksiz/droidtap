@@ -10,24 +10,27 @@ use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
 
 pub const RATE: u32 = 48000;
-pub const CHANNELS: u16 = 2;
 pub const BYTES_PER_SAMPLE: u16 = 2;
-pub const FRAME: u64 = (CHANNELS * BYTES_PER_SAMPLE) as u64;
 
 const HEADER_LEN: u64 = 80;
 
 pub struct Wav {
     out: BufWriter<File>,
+    channels: u16,
     data_len: u64,
 }
 
 impl Wav {
     /// Creates the file; fails if it already exists.
-    pub fn create(path: &Path) -> io::Result<Wav> {
+    pub fn create(path: &Path, channels: u16) -> io::Result<Wav> {
         let file = OpenOptions::new().write(true).create_new(true).open(path)?;
         let mut out = BufWriter::with_capacity(1 << 16, file);
-        out.write_all(&header(0))?;
-        Ok(Wav { out, data_len: 0 })
+        out.write_all(&header(channels, 0))?;
+        Ok(Wav {
+            out,
+            channels,
+            data_len: 0,
+        })
     }
 
     pub fn write(&mut self, pcm: &[u8]) -> io::Result<()> {
@@ -36,8 +39,12 @@ impl Wav {
         Ok(())
     }
 
+    pub fn channels(&self) -> u16 {
+        self.channels
+    }
+
     pub fn frames(&self) -> u64 {
-        self.data_len / FRAME
+        self.data_len / frame(self.channels)
     }
 
     /// Brings the file on disk up to date, header included.
@@ -45,16 +52,21 @@ impl Wav {
         self.out.flush()?;
         let file = self.out.get_mut();
         file.seek(SeekFrom::Start(0))?;
-        file.write_all(&header(self.data_len))?;
+        file.write_all(&header(self.channels, self.data_len))?;
         file.seek(SeekFrom::End(0))?;
         Ok(())
     }
 }
 
-fn header(data_len: u64) -> [u8; HEADER_LEN as usize] {
+/// The bytes of one frame: a sample of each channel.
+pub fn frame(channels: u16) -> u64 {
+    (channels * BYTES_PER_SAMPLE) as u64
+}
+
+fn header(channels: u16, data_len: u64) -> [u8; HEADER_LEN as usize] {
     let riff_len = HEADER_LEN - 8 + data_len;
     let rf64 = riff_len > u32::MAX as u64;
-    let block = CHANNELS * BYTES_PER_SAMPLE;
+    let block = channels * BYTES_PER_SAMPLE;
 
     let mut h = Vec::with_capacity(HEADER_LEN as usize);
     if rf64 {
@@ -64,7 +76,7 @@ fn header(data_len: u64) -> [u8; HEADER_LEN as usize] {
         h.extend(28u32.to_le_bytes());
         h.extend(riff_len.to_le_bytes());
         h.extend(data_len.to_le_bytes());
-        h.extend((data_len / FRAME).to_le_bytes());
+        h.extend((data_len / block as u64).to_le_bytes());
         h.extend(0u32.to_le_bytes());
     } else {
         h.extend(b"RIFF");
@@ -76,7 +88,7 @@ fn header(data_len: u64) -> [u8; HEADER_LEN as usize] {
     h.extend(b"fmt ");
     h.extend(16u32.to_le_bytes());
     h.extend(1u16.to_le_bytes()); // PCM
-    h.extend(CHANNELS.to_le_bytes());
+    h.extend(channels.to_le_bytes());
     h.extend(RATE.to_le_bytes());
     h.extend((RATE * block as u32).to_le_bytes());
     h.extend(block.to_le_bytes());

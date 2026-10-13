@@ -181,6 +181,7 @@ struct Levels {
 
 pub struct Screen {
     levels: Arc<Mutex<Levels>>,
+    channels: u16,
     painter: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
     // For the plain line, when there is no painter.
     last_line: Instant,
@@ -188,8 +189,8 @@ pub struct Screen {
 }
 
 impl Screen {
-    /// Starts showing the recording of `file`.
-    pub fn start(file: String) -> Screen {
+    /// Starts showing the recording of `file`, which has one or two channels.
+    pub fn start(file: String, channels: u16) -> Screen {
         let levels = Arc::new(Mutex::new(Levels {
             frames: 0,
             recent: [0; 2],
@@ -202,12 +203,13 @@ impl Screen {
             let stop = Arc::new(AtomicBool::new(false));
             let thread = {
                 let (levels, stop) = (levels.clone(), stop.clone());
-                std::thread::spawn(move || paint(&file, &levels, &stop))
+                std::thread::spawn(move || paint(&file, channels, &levels, &stop))
             };
             (stop, thread)
         });
         Screen {
             levels,
+            channels,
             painter,
             last_line: Instant::now(),
             since_line: 0,
@@ -218,10 +220,9 @@ impl Screen {
     /// length with it.
     pub fn audio(&mut self, pcm: &[u8], frames: u64) {
         let mut peaks = [0u16; 2];
-        for frame in pcm.as_chunks::<4>().0 {
-            let sample = |at| i16::from_le_bytes([frame[at], frame[at + 1]]).unsigned_abs();
-            peaks[0] = peaks[0].max(sample(0));
-            peaks[1] = peaks[1].max(sample(2));
+        for (at, sample) in pcm.as_chunks::<2>().0.iter().enumerate() {
+            let peak = &mut peaks[at % self.channels as usize];
+            *peak = (*peak).max(i16::from_le_bytes(*sample).unsigned_abs());
         }
         let peak = peaks[0].max(peaks[1]);
         {
@@ -307,7 +308,7 @@ impl Meter {
 }
 
 /// Redraws the panel until told to stop.
-fn paint(file: &str, levels: &Mutex<Levels>, stop: &AtomicBool) {
+fn paint(file: &str, channels: u16, levels: &Mutex<Levels>, stop: &AtomicBool) {
     let silent = Meter {
         level: f32::NEG_INFINITY,
         hold: f32::NEG_INFINITY,
@@ -341,22 +342,29 @@ fn paint(file: &str, levels: &Mutex<Levels>, stop: &AtomicBool) {
         }
 
         let stalled = quiet >= STALLED;
-        let lines = [
+        let mut lines = vec![
             String::new(),
             headline(
                 file,
                 frames,
+                channels,
                 stalled,
                 (tick / (TICKS_PER_SECOND / 2)).is_multiple_of(2),
             ),
             String::new(),
-            meter_line('L', &meters[0]),
-            meter_line('R', &meters[1]),
+        ];
+        if channels == 1 {
+            lines.push(meter_line('M', &meters[0]));
+        } else {
+            lines.push(meter_line('L', &meters[0]));
+            lines.push(meter_line('R', &meters[1]));
+        }
+        lines.extend([
             format!("     {FAINT}{}", scale()),
             String::new(),
             history_line(&history),
-            footer(highest, gaps, stalled.then_some(quiet)),
-        ];
+            footer(highest, gaps, channels, stalled.then_some(quiet)),
+        ]);
         draw(&lines);
         std::thread::sleep(TICK);
     }
@@ -386,7 +394,7 @@ fn spread(left: &str, left_len: usize, right: &str, right_len: usize) -> String 
     format!("  {left}{RESET}{:gap$}{right}", "")
 }
 
-fn headline(file: &str, frames: u64, stalled: bool, lit: bool) -> String {
+fn headline(file: &str, frames: u64, channels: u16, stalled: bool, lit: bool) -> String {
     let time = clock(frames);
     let left = match (stalled, lit) {
         (true, _) => format!("{YELLOW}○ REC{RESET}  {BOLD}{time}"),
@@ -394,7 +402,7 @@ fn headline(file: &str, frames: u64, stalled: bool, lit: bool) -> String {
         (false, false) => format!("{FAINT}●{RED} REC{RESET}  {BOLD}{time}"),
     };
     let left_len = 7 + time.len();
-    let size = size(frames);
+    let size = size(frames, channels);
     let size_len = 3 + size.chars().count();
 
     let room = WIDTH.saturating_sub(left_len + 2 + size_len);
@@ -492,7 +500,7 @@ fn history_line(history: &VecDeque<u16>) -> String {
     out
 }
 
-fn footer(highest: u16, gaps: u32, quiet: Option<Duration>) -> String {
+fn footer(highest: u16, gaps: u32, channels: u16, quiet: Option<Duration>) -> String {
     let left = if let Some(quiet) = quiet {
         format!("Android sent no audio for {} s", quiet.as_secs())
     } else {
@@ -502,6 +510,7 @@ fn footer(highest: u16, gaps: u32, quiet: Option<Duration>) -> String {
             format!("peak {}", level(highest).trim_start())
         };
         match gaps {
+            0 if channels == 1 => format!("{peak} · 48 kHz, 16 bit, mono"),
             0 => format!("{peak} · 48 kHz, 16 bit, stereo"),
             1 => format!("{peak} · 1 interruption"),
             _ => format!("{peak} · {gaps} interruptions"),

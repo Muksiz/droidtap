@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts, stops, records with and updates droidtap on Linux or macOS; the
 # counterpart of droidtap.bat. Without a command it shows a menu. Usage:
-#   ./droidtap.sh [start | record [name] | listen [name] | recordings | stop | status | update]
+#   ./droidtap.sh [start | record [--mono] [name] | listen [name] | recordings | stop | status | update]
 set -u
 cd "$(dirname "$0")"
 self=./$(basename "$0")
@@ -116,7 +116,7 @@ record() {
 # that there is always something left to play. The file is only read, which
 # the recording does not notice. Without a name it is the newest recording.
 listen() {
-    local file='' candidate ms player=ffplay
+    local file='' candidate channels ms player=ffplay
     # An ffplay next to this script goes before an installed one.
     if [ -x ./ffplay ]; then
         player=./ffplay
@@ -137,8 +137,10 @@ listen() {
         bad "There is no recording to listen to. Start one first, in another terminal."
         return 1
     fi
-    # 192 bytes are a millisecond of 48 kHz, 16 bit, stereo.
-    ms=$(($(wc -c < "$file") / 192 - 1000))
+    # The 59th byte of a recording is its number of channels, and 96 bytes
+    # are a millisecond of one channel at 48 kHz and 16 bit.
+    channels=$(od -An -tu1 -j58 -N1 "$file")
+    ms=$(($(wc -c < "$file") / (96 * channels) - 1000))
     if [ $ms -lt 0 ]; then
         ms=0
     fi
@@ -218,6 +220,21 @@ leave_menu() {
 leave_for_command() {
     leave_menu
     printf '\033[H\033[2J'
+}
+
+# Asks for two channels or one. Leaves the option for one in "mono", or
+# nothing.
+ask_channels() {
+    local answer
+    while true; do
+        read -r -p "Stereo or mono (s or m, empty: stereo): " answer || answer=''
+        case "$answer" in
+            '' | s | S | stereo) mono='' ;;
+            m | M | mono) mono=--mono ;;
+            *) continue ;;
+        esac
+        return
+    done
 }
 
 pause() {
@@ -301,9 +318,10 @@ choose() {
             else
                 leave_for_command
                 read -r -p "Name of the recording (empty: date and time): " name || name=''
+                ask_channels
                 # Ctrl+C ends the recording, not this menu.
                 trap : INT
-                record ${name:+"$name"}
+                record $mono ${name:+"$name"}
                 trap 'exit 130' INT
                 pause
                 enter_menu
@@ -417,9 +435,10 @@ plain_menu() {
             1) start ;;
             2)
                 read -r -p "Name of the recording (empty: date and time): " name || continue
+                ask_channels
                 # Ctrl+C ends the recording, not this menu.
                 trap : INT
-                record ${name:+"$name"}
+                record $mono ${name:+"$name"}
                 trap - INT
                 ;;
             3)
@@ -472,7 +491,7 @@ main() {
             fi
             ;;
         *)
-            echo "Usage: $0 [start | record [name] | listen [name] | recordings | stop | status | update]" >&2
+            echo "Usage: $0 [start | record [--mono] [name] | listen [name] | recordings | stop | status | update]" >&2
             exit 2
             ;;
     esac

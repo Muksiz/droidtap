@@ -4,8 +4,8 @@
 > tones were recorded bit for bit, over ten minutes of ordinary computer use
 > and with every processor core busy. Real phones and Windows are untested.
 
-Records what an Android device plays into a WAV file (48 kHz, 16 bit, stereo)
-without touching the computer's sound.
+Records what an Android device plays into a WAV file (48 kHz, 16 bit, stereo
+or mono) without touching the computer's sound.
 
 The audio is captured inside Android by [scrcpy](https://github.com/Genymobile/scrcpy)'s
 server program and reaches `droidtap` through adb, as a network stream:
@@ -26,6 +26,7 @@ Needs Docker or Podman with compose, and `/dev/kvm`.
 ```sh
 ./droidtap.sh start            # opens Android in a browser desktop (http://localhost:6080), starting it if needed
 ./droidtap.sh record my-book   # records until Ctrl+C -> recordings/my-book.wav
+./droidtap.sh record --mono my-book   # the same with one channel, at half the size
 ./droidtap.sh listen           # in a second terminal: plays the recording being made
 ./droidtap.sh recordings       # opens the recordings folder
 ./droidtap.sh stop             # Android, its apps and logins are kept
@@ -33,8 +34,8 @@ Needs Docker or Podman with compose, and `/dev/kvm`.
 ```
 
 `./droidtap.sh` without a command shows a menu with the same choices, plus
-`status`. On Windows, `droidtap.bat` does the same; double-click it for the
-menu.
+`status`; before a recording it asks for the name and for stereo or mono. On
+Windows, `droidtap.bat` does the same; double-click it for the menu.
 
 `listen` needs `ffplay`, which comes with [FFmpeg](https://ffmpeg.org) (on
 Windows: `winget install Gyan.FFmpeg`). Instead of installing it you can put
@@ -86,6 +87,8 @@ See `droidtap --help` for the options.
   keeps a separate volume for each output, so the volume of the device's
   speaker or headphones is not changed. Do not turn the volume down on the
   device while recording.
+- Android always delivers stereo. With `--mono`, `droidtap` writes the mean
+  of the left and the right channel.
 - `droidtap` prints a note whenever Android delivered no audio for more than
   50 ms. Pauses in playback cause these too.
 - The WAV header is rewritten every few seconds, so a recording survives a

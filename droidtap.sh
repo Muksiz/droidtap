@@ -116,9 +116,12 @@ record() {
 # that there is always something left to play. The file is only read, which
 # the recording does not notice. Without a name it is the newest recording.
 listen() {
-    local file='' candidate ms
-    if ! command -v ffplay > /dev/null 2>&1; then
-        bad "ffplay was not found. It comes with FFmpeg: install that first."
+    local file='' candidate ms player=ffplay
+    # An ffplay next to this script goes before an installed one.
+    if [ -x ./ffplay ]; then
+        player=./ffplay
+    elif ! command -v ffplay > /dev/null 2>&1; then
+        bad "ffplay was not found. It comes with FFmpeg: install that, or put ffplay in $PWD"
         return 1
     fi
     if [ $# -gt 0 ]; then
@@ -141,7 +144,7 @@ listen() {
     fi
     echo "Listening to $file, a second behind - press Ctrl+C to stop"
     # The header's length is out of date, and the file's end is not the end.
-    ffplay -nodisp -nostats -loglevel error -probesize 32 -analyzeduration 0 \
+    "$player" -nodisp -nostats -loglevel error -probesize 32 -analyzeduration 0 \
         -follow 1 -ignore_length 1 -ss "$((ms / 1000)).$(printf '%03d' $((ms % 1000)))" -i "$file"
 }
 

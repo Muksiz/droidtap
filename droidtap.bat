@@ -228,11 +228,13 @@ exit /b
 rem Plays a recording while it is being made, from a second before its end, so
 rem that there is always something left to play. The file is only read, which
 rem the recording does not notice. Without a name it is the newest recording.
+rem An ffplay.exe next to this file goes before an installed one: Windows
+rem looks in the current folder first.
 :listen
 where ffplay >nul 2>&1
 if errorlevel 1 (
-    echo %S_RED%ffplay was not found.%S_OFF% It comes with FFmpeg. Install that first, for example
-    echo with "winget install Gyan.FFmpeg", and open a new window.
+    echo %S_RED%ffplay was not found.%S_OFF% It comes with FFmpeg. Install that, for example with
+    echo "winget install Gyan.FFmpeg" and a new window, or put ffplay.exe in !CD!
     exit /b 1
 )
 rem The newest is the one created last: while a file is being written, the

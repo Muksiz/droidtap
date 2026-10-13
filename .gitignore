@@ -2,3 +2,5 @@
 recordings/*
 !recordings/.gitkeep
 .env
+/ffplay
+/ffplay.exe

@@ -37,7 +37,8 @@ Needs Docker or Podman with compose, and `/dev/kvm`.
 menu.
 
 `listen` needs `ffplay`, which comes with [FFmpeg](https://ffmpeg.org) (on
-Windows: `winget install Gyan.FFmpeg`). It plays the newest recording, or the
+Windows: `winget install Gyan.FFmpeg`). Instead of installing it you can put
+the `ffplay` program (`ffplay.exe` on Windows) next to the script. It plays the newest recording, or the
 one named, from a second before its end and follows the file as it grows. It
 only reads the file, so the recording is not affected; what you hear is about
 a second behind Android.

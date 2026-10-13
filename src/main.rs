@@ -39,6 +39,9 @@ const MAX_PACKET: usize = 1 << 20;
 
 /// Report when Android's clock ran this far ahead of the audio it delivered.
 const GAP_US: u64 = 50_000;
+/// Report when the audio was nothing but zeros for this many frames (20 ms)
+/// between two sounds.
+const SILENCE_FRAMES: u64 = 960;
 const SYNC_INTERVAL: Duration = Duration::from_secs(5);
 
 const HELP: &str = "\
@@ -234,6 +237,10 @@ fn run(opts: Options) -> io::Result<()> {
     let mut last_sync = Instant::now();
     let mut expected_pts = None;
     let mut gaps = 0u32;
+    // How many frames of zeros the audio ends with so far, and whether there
+    // was any sound before them.
+    let mut silent = 0u64;
+    let mut heard = false;
     while let Some(pts_and_flags) = read_packet(&mut audio, &mut payload, &stop)? {
         if pts_and_flags & FLAG_CONFIG != 0 {
             continue;
@@ -249,13 +256,34 @@ fn run(opts: Options) -> io::Result<()> {
             gaps += 1;
             screen.gap();
             note(&format!(
-                "note: at {} Android delivered no audio for {} ms",
+                "note: at {} Android delivered no audio for {}",
                 clock(wav.frames()),
-                (pts - expected) / 1000
+                span((pts - expected) / 1000)
             ));
         }
         let frames = payload.len() as u64 / wav::frame(STEREO);
         expected_pts = Some(pts + frames * 1_000_000 / wav::RATE as u64);
+
+        // Android keeps delivering audio while nothing plays: zeros. Zeros in
+        // the middle of the sound are a pause in playback, or audio that
+        // Android failed to deliver in time.
+        for (at, frame) in payload.as_chunks::<4>().0.iter().enumerate() {
+            if *frame == [0; 4] {
+                silent += 1;
+                continue;
+            }
+            if heard && silent >= SILENCE_FRAMES {
+                gaps += 1;
+                screen.gap();
+                note(&format!(
+                    "note: at {} the audio was silent for {}",
+                    clock(wav.frames() + at as u64 - silent),
+                    span(silent * 1000 / wav::RATE as u64)
+                ));
+            }
+            heard = true;
+            silent = 0;
+        }
 
         if opts.mono {
             mix_down(&mut payload);
@@ -480,6 +508,15 @@ fn clock(frames: u64) -> String {
         seconds / 60 % 60,
         seconds % 60
     )
+}
+
+/// A length of time for a note: milliseconds, or seconds from one second on.
+fn span(ms: u64) -> String {
+    if ms < 1000 {
+        format!("{ms} ms")
+    } else {
+        format!("{:.1} s", ms as f64 / 1000.0)
+    }
 }
 
 /// The size of a recording of that many frames, without its header.

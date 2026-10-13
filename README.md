@@ -27,7 +27,12 @@ Needs Docker or Podman with compose, and `/dev/kvm`.
 ./droidtap.sh start            # Android in a browser desktop: http://localhost:6080
 ./droidtap.sh record my-book   # records until Ctrl+C -> recordings/my-book.wav
 ./droidtap.sh stop             # Android, its apps and logins are kept
+./droidtap.sh update           # git pull, rebuild the containers
 ```
+
+`./droidtap.sh` without a command shows a menu with the same choices, plus
+`open` (the Android screen in the browser) and `status`. On Windows,
+`droidtap.bat` does the same; double-click it for the menu.
 
 Without the script:
 

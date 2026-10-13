@@ -2,7 +2,7 @@
 rem Starts, stops, records with and updates droidtap on Windows; the
 rem counterpart of droidtap.sh. Without a command (or when double-clicked) it
 rem shows a menu. Usage:
-rem   droidtap.bat [start ^| record [name] ^| stop ^| open ^| status ^| update]
+rem   droidtap.bat [start ^| record [name] ^| recordings ^| stop ^| status ^| update]
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
@@ -10,65 +10,185 @@ set "URL=http://localhost:6080"
 set "CONTAINER=droidtap-emulator"
 set "MODE="
 
-call :find_engine
-if errorlevel 1 (
-    if "%~1"=="" pause
-    exit /b 1
-)
+rem Colours, and EL, which clears the rest of a line.
+for /f %%e in ('echo prompt $E^| cmd') do set "ESC=%%e"
+set "S_BOLD=%ESC%[1m"
+set "S_DIM=%ESC%[90m"
+set "S_RED=%ESC%[31m"
+set "S_GREEN=%ESC%[32m"
+set "S_CYAN=%ESC%[36m"
+set "S_OFF=%ESC%[0m"
+if defined NO_COLOR for %%s in (BOLD DIM RED GREEN CYAN OFF) do set "S_%%s="
+set "EL=%ESC%[K"
 
+rem The texts below are UTF-8. The console is switched to that here, and
+rem back at :quit.
+set "OLDCP="
+for /f "tokens=2 delims=:." %%c in ('chcp') do set /a "OLDCP=%%c" 2>nul
+if "%OLDCP%"=="0" set "OLDCP="
+chcp 65001 >nul
+
+rem The one command that works without a container engine.
+if /i "%~1"=="recordings" call :recordings & goto quit
+
+call :find_engine
+if not errorlevel 1 goto dispatch
+if "%~1"=="" pause
+set "RC=1"
+goto quit_rc
+
+:dispatch
 if "%~1"=="" goto menu
-if /i "%~1"=="start" goto start
-if /i "%~1"=="record" goto record_args
-if /i "%~1"=="stop" goto stop
-if /i "%~1"=="open" goto open
-if /i "%~1"=="status" goto status
+if /i "%~1"=="start" call :start & goto quit
+if /i "%~1"=="record" call :record_args %* & goto quit
+if /i "%~1"=="stop" call :stop & goto quit
+if /i "%~1"=="status" call :status & goto quit
 if /i "%~1"=="update" goto update
 if /i "%~1"=="_rebuild" goto rebuild_then
-echo Usage: %~nx0 [start ^| record [name] ^| stop ^| open ^| status ^| update]
-exit /b 2
+echo Usage: %~nx0 [start ^| record [name] ^| recordings ^| stop ^| status ^| update]
+set "RC=2"
+goto quit_rc
+
+rem Every way out comes through here, with the result in the error level or,
+rem at :quit_rc, in RC.
+:quit
+set "RC=%errorlevel%"
+:quit_rc
+if defined OLDCP chcp %OLDCP% >nul 2>&1
+exit /b %RC%
 
 rem ---------------------------------------------------------------- menu
+rem
+rem The menu is drawn over itself, from the top left corner, and again every
+rem few seconds to keep up with the world. What it starts gets a cleared
+rem screen.
 
 :menu
 set "MODE=menu"
-echo.
+set "MSG="
+:menu_clear
+cls
+:menu_draw
 call :android_running
-if errorlevel 1 (
-    echo droidtap - Android is not running
+if errorlevel 1 (set "UP=") else (set "UP=1")
+set "COUNT=0"
+for %%f in (recordings\*.wav) do set /a COUNT+=1
+rem Recording and stopping need a running Android.
+if defined UP (
+    set "STATE=%S_GREEN%●%S_OFF% running at %S_CYAN%%URL%%S_OFF%"
+    set "ITEM1=Open Android in the browser "
+    set "HINT1="
+    set "HINT2=until Ctrl+C"
+    set "HINT4=its apps and logins are kept"
+    set "S_NEED="
 ) else (
-    echo droidtap - Android is running: %URL%
+    set "STATE=%S_DIM%○ not running%S_OFF%"
+    set "ITEM1=Start Android               "
+    set "HINT1=and open its screen in the browser"
+    set "HINT2=start Android first"
+    set "HINT4=it is not running"
+    set "S_NEED=%S_DIM%"
 )
-echo   1^) Start Android
-echo   2^) Record
-echo   3^) Stop Android
-echo   4^) Open the Android screen in the browser
-echo   5^) Status and log
-echo   6^) Update (git pull, rebuild the containers^)
-echo   q^) Quit
-set "PICK="
-set /p "PICK=> "
+echo %ESC%[H%EL%
+echo   %S_DIM%┌──────────────────────────────────────────────────────────┐%S_OFF%%EL%
+echo   %S_DIM%│%S_OFF%  %S_BOLD%%S_GREEN%droidtap%S_OFF%  records what Android plays, and nothing else  %S_DIM%│%S_OFF%%EL%
+echo   %S_DIM%└──────────────────────────────────────────────────────────┘%S_OFF%%EL%
+echo.%EL%
+echo    Android      %STATE%%EL%
+echo    Recordings   %COUNT% in the folder recordings%EL%
+echo.%EL%
+echo    %S_BOLD%1%S_OFF%  %ITEM1%  %S_DIM%%HINT1%%S_OFF%%EL%
+echo    %S_BOLD%2%S_OFF%  %S_NEED%Record                      %S_OFF%  %S_DIM%%HINT2%%S_OFF%%EL%
+echo    %S_BOLD%3%S_OFF%  Open the recordings folder%EL%
+echo    %S_BOLD%4%S_OFF%  %S_NEED%Stop Android                %S_OFF%  %S_DIM%%HINT4%%S_OFF%%EL%
+echo    %S_BOLD%5%S_OFF%  Status and log%EL%
+echo    %S_BOLD%6%S_OFF%  Update                        %S_DIM%git pull, rebuild the containers%S_OFF%%EL%
+echo    %S_BOLD%q%S_OFF%  Quit%EL%
+echo.%EL%
+echo.   !MSG!%EL%
+echo.%EL%
+echo   %S_DIM%Press 1-6, or q to quit%S_OFF%%EL%%ESC%[J
+
+rem "r" is what choice answers by itself after five seconds: draw again.
+choice /c 123456qr /n /t 5 /d r >nul
+set "PICK=%errorlevel%"
+if "%PICK%"=="8" goto menu_draw
+set "MSG="
+if "%PICK%"=="1" goto menu_start
+if "%PICK%"=="2" goto menu_record
+if "%PICK%"=="3" goto menu_recordings
+if "%PICK%"=="4" goto menu_stop
+if "%PICK%"=="5" goto menu_status
+if "%PICK%"=="6" goto menu_update
+if "%PICK%"=="7" set "RC=0" & goto quit_rc
+rem choice cannot work without a keyboard.
+if "%PICK%"=="255" set "RC=1" & goto quit_rc
+goto menu_draw
+
+:menu_start
+cls
+call :start
+if errorlevel 1 goto menu_pause
+set "MSG=%S_GREEN%Android is open in the browser.%S_OFF%"
+if defined FRESH set "MSG=!MSG! It needs about a minute to boot."
+goto menu_clear
+
+:menu_record
+if defined UP goto menu_record_now
+set "MSG=%S_RED%Android is not running. Start it first.%S_OFF%"
+goto menu_draw
+:menu_record_now
+cls
+call :record_menu
+goto menu_pause
+
+:menu_recordings
+call :recordings >nul
+set "MSG=%S_GREEN%Opened the folder%S_OFF% !CD!\recordings"
+goto menu_draw
+
+:menu_stop
+cls
+call :stop
+if errorlevel 1 goto menu_pause
+set "MSG=%S_GREEN%Android is stopped.%S_OFF%"
+goto menu_clear
+
+:menu_status
+cls
+call :status
+goto menu_pause
+
+:menu_update
+cls
+goto update
+
+rem Leaves what a command printed on the screen until a key is pressed.
+:menu_pause
 echo.
-if "!PICK!"=="1" call :start
-if "!PICK!"=="2" call :record_menu
-if "!PICK!"=="3" call :stop
-if "!PICK!"=="4" call :open
-if "!PICK!"=="5" call :status
-if "!PICK!"=="6" goto update
-if /i "!PICK!"=="q" exit /b 0
-goto menu
+pause
+goto menu_clear
 
 rem ------------------------------------------------------------ commands
 
+rem Opens the Android screen in the browser, starting Android first if
+rem needed. Leaves behind in FRESH whether it had to.
 :start
-echo Starting Android... (the first start downloads several GB)
+set "FRESH="
+call :android_running
+if not errorlevel 1 goto start_open
+set "FRESH=1"
+echo %S_CYAN%►%S_OFF% %S_BOLD%Starting Android%S_OFF% (the first start downloads several GB)
 %COMPOSE% up -d
 if errorlevel 1 goto start_failed
+:start_open
 call :open_desktop
 if errorlevel 1 goto start_failed
+if defined FRESH echo   Android needs about a minute to boot.
 exit /b 0
 :start_failed
 echo.
-echo Something went wrong. Recent log:
+echo %S_RED%Something went wrong.%S_OFF% Recent log:
 %COMPOSE% logs --tail 25
 exit /b 1
 
@@ -91,31 +211,28 @@ goto record_args_next
 :record
 call :android_running
 if errorlevel 1 (
-    echo Android is not running. Start it first.
+    echo %S_RED%Android is not running.%S_OFF% Start it first.
     exit /b 1
 )
 %COMPOSE% --profile record run --rm recorder %RECORD_ARGS%
 exit /b
 
+:recordings
+echo The recordings are in !CD!\recordings
+start "" "!CD!\recordings"
+exit /b 0
+
 :stop
-echo Stopping Android...
+echo %S_CYAN%►%S_OFF% %S_BOLD%Stopping Android%S_OFF%
 %COMPOSE% down
 exit /b
-
-:open
-call :android_running
-if errorlevel 1 (
-    echo Android is not running. Start it first.
-    exit /b 1
-)
-goto open_desktop
 
 :status
 call :android_running
 if errorlevel 1 (
-    echo Android is not running.
+    echo %S_DIM%○%S_OFF% Android is not running.
 ) else (
-    echo Android is running: %URL%
+    echo %S_GREEN%●%S_OFF% Android is running: %S_CYAN%%URL%%S_OFF%
 )
 echo.
 %COMPOSE% ps
@@ -126,36 +243,40 @@ exit /b
 rem "update" fetches the new version and hands over to it for the rest, so
 rem that the rebuild is done the way the new version wants it. cmd reads a
 rem batch file line by line while running it and git replaces this file, so
-rem both steps are in one block, which is read as a whole, and nothing of
+rem the steps are in one block, which is read as a whole, and nothing of
 rem the old file runs afterwards: starting a batch file without "call" does
 rem not come back. For the same reason this is only reached with "goto".
 :update
-echo Fetching the latest version...
+echo %S_CYAN%►%S_OFF% %S_BOLD%Fetching the latest version%S_OFF%
 (
     git pull || goto update_failed
+    if defined OLDCP chcp %OLDCP% >nul 2>&1
     "%~f0" _rebuild %MODE%
 )
 :update_failed
 echo.
-echo git pull failed, nothing was changed. See the message above.
-if "%MODE%"=="menu" goto menu
-exit /b 1
+echo %S_RED%git pull failed, nothing was changed.%S_OFF% See the message above.
+if "%MODE%"=="menu" goto menu_pause
+set "RC=1"
+goto quit_rc
 
 :rebuild_then
 call :rebuild
-if "%~2"=="menu" goto menu
-exit /b
+if not "%~2"=="menu" goto quit
+echo.
+pause
+goto menu
 
 :rebuild
-echo Rebuilding the containers...
+echo %S_CYAN%►%S_OFF% %S_BOLD%Rebuilding the containers%S_OFF%
 %COMPOSE% --profile record build
 if errorlevel 1 exit /b 1
 call :android_running
 if errorlevel 1 (
-    echo Up to date.
+    echo %S_GREEN%Up to date.%S_OFF%
     exit /b 0
 )
-echo Restarting Android with the new version...
+echo %S_CYAN%►%S_OFF% %S_BOLD%Restarting Android with the new version%S_OFF%
 %COMPOSE% down
 if errorlevel 1 exit /b 1
 goto start
@@ -181,13 +302,13 @@ if not errorlevel 1 (
     set "COMPOSE=podman-compose"
     goto check_engine
 )
-echo Neither "docker compose" nor "podman compose" was found.
+echo %S_RED%Neither "docker compose" nor "podman compose" was found.%S_OFF%
 echo Install Docker Desktop or Podman Desktop first.
 exit /b 1
 :check_engine
 %ENGINE% info >nul 2>&1
 if errorlevel 1 (
-    echo %ENGINE% is installed but not running. Start it first.
+    echo %S_RED%%ENGINE% is installed but not running.%S_OFF% Start it first.
     exit /b 1
 )
 exit /b 0
@@ -198,18 +319,21 @@ for /f "usebackq delims=" %%s in (`%ENGINE% inspect -f "{{.State.Running}}" %CON
 if "%RUNNING%"=="true" exit /b 0
 exit /b 1
 
+rem Waits for the desktop to answer, two minutes at most, and opens it.
 :open_desktop
-echo Waiting for the desktop...
+<nul set /p "=Waiting for the desktop"
 set /a TRIES=0
 :open_desktop_wait
-curl -s -o nul "%URL%/"
+curl -s -m 2 -o nul "%URL%/"
 if not errorlevel 1 (
+    echo.
     start "" "%URL%"
-    echo The desktop is at %URL%. Android needs about a minute to boot.
+    echo %S_GREEN%The desktop is at%S_OFF% %S_CYAN%%URL%%S_OFF%
     exit /b 0
 )
+<nul set /p "=."
 set /a TRIES+=1
-if %TRIES% geq 60 exit /b 1
+if %TRIES% geq 60 echo. & exit /b 1
 rem Waits two seconds; "timeout" refuses to run without a keyboard.
 ping -n 3 127.0.0.1 >nul
 goto open_desktop_wait

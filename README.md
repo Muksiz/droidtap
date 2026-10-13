@@ -24,15 +24,16 @@ level meters `droidtap` shows and check the file afterwards.
 Needs Docker or Podman with compose, and `/dev/kvm`.
 
 ```sh
-./droidtap.sh start            # Android in a browser desktop: http://localhost:6080
+./droidtap.sh start            # opens Android in a browser desktop (http://localhost:6080), starting it if needed
 ./droidtap.sh record my-book   # records until Ctrl+C -> recordings/my-book.wav
+./droidtap.sh recordings       # opens the recordings folder
 ./droidtap.sh stop             # Android, its apps and logins are kept
 ./droidtap.sh update           # git pull, rebuild the containers
 ```
 
 `./droidtap.sh` without a command shows a menu with the same choices, plus
-`open` (the Android screen in the browser) and `status`. On Windows,
-`droidtap.bat` does the same; double-click it for the menu.
+`status`. On Windows, `droidtap.bat` does the same; double-click it for the
+menu.
 
 Without the script:
 

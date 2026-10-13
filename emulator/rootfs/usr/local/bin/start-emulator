@@ -28,6 +28,46 @@ if [ ! -f "$CONFIG" ]; then
     set_ini hw.lcd.density 320
 fi
 
+# The emulator reads the place of its window from this file and writes it
+# back when it stops, so the place is set at every start.
+USER_INI="$AVD_DIR/emulator-user.ini"
+touch "$USER_INI"
+sed -i '/^window\.[xy] *=/d' "$USER_INI"
+printf 'window.x = 0\nwindow.y = 0\n' >> "$USER_INI"
+
+# The emulator opens its window no taller than 80% of the desktop, whatever
+# scale it is told, but keeps a size the window is given afterwards. That
+# is EMULATOR_SCALE percent of the Android screen, and without it the
+# largest size the desktop has room for.
+fit_window() {
+    local desktop=${SCREEN%x*} width height by_width by_height scale window
+    width=$(sed -n 's/^hw\.lcd\.width *= *//p' "$CONFIG")
+    height=$(sed -n 's/^hw\.lcd\.height *= *//p' "$CONFIG")
+    if [ -n "${EMULATOR_SCALE:-}" ]; then
+        scale=$((EMULATOR_SCALE * 10))
+    else
+        # The window has a title bar above it and the emulator's toolbar
+        # next to it.
+        by_width=$(((${desktop%x*} - 60) * 1000 / width))
+        by_height=$(((${desktop#*x} - 30) * 1000 / height))
+        scale=$((by_width < by_height ? by_width : by_height))
+    fi
+    width=$((width * scale / 1000))
+    height=$((height * scale / 1000))
+    window=$(xdotool search --sync --onlyvisible --name '^Android Emulator' | head -n 1)
+    # The emulator sets its own size once more, a moment after the window is
+    # there, and rounds a size it is given to the shape of the Android screen.
+    for _ in {1..20}; do
+        eval "$(xdotool getwindowgeometry --shell "$window")"
+        if [ $((height - HEIGHT)) -gt 2 ] || [ $((HEIGHT - height)) -gt 2 ]; then
+            xdotool windowsize "$window" "$width" "$height"
+        fi
+        sleep 0.5
+    done
+}
+# In a subshell, so that it is not left behind as a child of the emulator.
+(fit_window &)
+
 # Lock files survive an unclean stop and make the emulator refuse to start.
 rm -rf "$AVD_DIR"/*.lock
 

@@ -56,8 +56,11 @@ noVNC; it has no sound device) and `recorder` (`droidtap`, started once per
 recording). The recorder reaches the emulator's adb server over the compose
 network; only port 6080 is published, on `127.0.0.1`, without a password.
 
-Settings (`SCREEN`, `EMULATOR_RAM_MB`, `EMULATOR_CORES`, `EMULATOR_DATA_SIZE`)
-can be overridden in a `.env` file next to `compose.yaml`.
+Settings (`SCREEN`, `EMULATOR_SCALE`, `EMULATOR_RAM_MB`, `EMULATOR_CORES`,
+`EMULATOR_DATA_SIZE`) can be overridden in a `.env` file next to
+`compose.yaml`. The emulator's window is made as large as the desktop has
+room for; `EMULATOR_SCALE` is its size in percent of the Android screen
+instead.
 
 ## With a real phone, or without containers
 

@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl unzip procps \
         openjdk-17-jre-headless \
         # desktop, reachable from a browser through noVNC
-        xvfb openbox x11vnc novnc websockify supervisor \
+        xvfb openbox x11vnc novnc websockify supervisor xdotool \
         # emulator (bundled Qt) runtime libraries
         libgl1 libnss3 libdbus-1-3 libfontconfig1 libsm6 libice6 libasound2 \
         libpulse0 libx11-xcb1 libxcomposite1 libxcursor1 libxdamage1 libxi6 \

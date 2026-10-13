@@ -44,6 +44,7 @@ services:
       - "127.0.0.1:6080:6080" # noVNC desktop: http://localhost:6080
     environment: # override any of these in a .env file next to this one
       SCREEN: ${SCREEN:-1280x900x24} # width x height x colour depth of the browser desktop
+      EMULATOR_SCALE: ${EMULATOR_SCALE:-} # size of the emulator's window in percent of the Android screen (720x1280); empty: as large as the desktop has room for
       EMULATOR_RAM_MB: ${EMULATOR_RAM_MB:-4096}
       EMULATOR_CORES: ${EMULATOR_CORES:-8}
       EMULATOR_DATA_SIZE: ${EMULATOR_DATA_SIZE:-16G} # only applied when the Android device is first created

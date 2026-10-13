@@ -291,6 +291,10 @@ impl Meter {
     fn update(&mut self, peak: u16) {
         let now = decibels(peak);
         self.level = now.max(self.level - FALL);
+        // Below the meter there is nothing left to fall through.
+        if self.level < FLOOR {
+            self.level = f32::NEG_INFINITY;
+        }
         if now >= self.hold {
             self.hold = now;
             self.held = 0;

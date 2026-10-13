@@ -39,9 +39,9 @@ const MAX_PACKET: usize = 1 << 20;
 
 /// Report when Android's clock ran this far ahead of the audio it delivered.
 const GAP_US: u64 = 50_000;
-/// Report when the audio was nothing but zeros for this many frames (20 ms)
+/// Report when the audio was nothing but zeros for this many frames (10 s)
 /// between two sounds.
-const SILENCE_FRAMES: u64 = 960;
+const SILENCE_FRAMES: u64 = 10 * wav::RATE as u64;
 const SYNC_INTERVAL: Duration = Duration::from_secs(5);
 
 const HELP: &str = "\

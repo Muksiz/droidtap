@@ -222,7 +222,7 @@ docker exec droidtap-emulator adb devices
 - Android always delivers stereo. With `--mono`, `droidtap` writes the mean
   of the left and the right channel.
 - `droidtap` prints a note whenever Android delivered no audio for more than
-  50 ms, and whenever the audio was completely silent for more than 20 ms
+  50 ms, and whenever the audio was completely silent for more than 10 s
   between two sounds. Pauses in playback cause these too.
 - The WAV header is rewritten every few seconds, so a recording survives a
   crash. Files over 4 GB (about 6 hours) are written as RF64.

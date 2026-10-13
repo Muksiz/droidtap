@@ -196,8 +196,8 @@ rebuild() {
 # ------------------------------------------------------------------ menu
 #
 # The menu has the terminal's second screen to itself. Whatever it starts
-# runs on the ordinary screen, where the output is still there to read
-# after the menu is gone.
+# runs on the ordinary screen, cleared of what ran there before, where the
+# output is still there to read after the menu is gone.
 
 in_menu=false
 
@@ -211,6 +211,13 @@ leave_menu() {
         printf '\033[?25h\033[?1049l'
         in_menu=false
     fi
+}
+
+# Leaves the menu for a cleared ordinary screen. What was on it is still in
+# the terminal's scrollback.
+leave_for_command() {
+    leave_menu
+    printf '\033[H\033[2J'
 }
 
 pause() {
@@ -294,7 +301,7 @@ choose() {
     message=''
     case "${keys[selected]}" in
         1)
-            leave_menu
+            leave_for_command
             if start; then
                 message="${green}✓${off} Android is open in the browser."
                 if $fresh; then
@@ -309,7 +316,7 @@ choose() {
             if ! android_running; then
                 message="${red}✗${off} Android is not running. Start it first."
             else
-                leave_menu
+                leave_for_command
                 read -r -p "Name of the recording (empty: date and time): " name || name=''
                 # Ctrl+C ends the recording, not this menu.
                 trap : INT
@@ -320,7 +327,7 @@ choose() {
             fi
             ;;
         3)
-            leave_menu
+            leave_for_command
             # Ctrl+C ends the listening, not this menu.
             trap : INT
             listen
@@ -333,7 +340,7 @@ choose() {
             message="${green}✓${off} Opened $PWD/recordings"
             ;;
         5)
-            leave_menu
+            leave_for_command
             if stop; then
                 message="${green}✓${off} Android is stopped."
             else
@@ -342,14 +349,14 @@ choose() {
             enter_menu
             ;;
         6)
-            leave_menu
+            leave_for_command
             status
             pause
             enter_menu
             ;;
         7)
             # Comes back only if the update failed.
-            leave_menu
+            leave_for_command
             update menu
             pause
             enter_menu

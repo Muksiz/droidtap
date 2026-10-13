@@ -142,7 +142,7 @@ listen() {
     if [ $ms -lt 0 ]; then
         ms=0
     fi
-    echo "Listening to $file, a second behind - press Ctrl+C to stop"
+    echo "Listening to $file - press Ctrl+C to stop"
     # The header's length is out of date, and the file's end is not the end.
     "$player" -nodisp -nostats -loglevel error -probesize 32 -analyzeduration 0 \
         -follow 1 -ignore_length 1 -ss "$((ms / 1000)).$(printf '%03d' $((ms % 1000)))" -i "$file"
@@ -229,8 +229,6 @@ pause() {
 # Looks up what the menu shows about the world.
 look() {
     if android_running; then running=true; else running=false; fi
-    set -- recordings/*.wav
-    if [ -e "$1" ]; then recorded=$#; else recorded=0; fi
 }
 
 # The entries: what each one says, depending on what was found.
@@ -246,21 +244,8 @@ entries() {
         "Update"
         "Quit"
     )
-    hints=(
-        "and open its screen in the browser"
-        "start Android first"
-        "while it is being made, with ffplay"
-        ""
-        "it is not running"
-        ""
-        "git pull, rebuild the containers"
-        ""
-    )
     if $running; then
         labels[0]="Open Android in the browser"
-        hints[0]=""
-        hints[1]="until Ctrl+C"
-        hints[4]="its apps and logins are kept"
     fi
 }
 
@@ -268,15 +253,14 @@ draw_menu() {
     local el=$'\033[K\n' screen i dim
     entries
     screen=$'\033[H'$el
-    screen+="  ${faint}╭──────────────────────────────────────────────────────────╮${off}$el"
-    screen+="  ${faint}│${off}  ${bold}${green}droidtap${off}  records what Android plays, and nothing else  ${faint}│${off}$el"
-    screen+="  ${faint}╰──────────────────────────────────────────────────────────╯${off}$el$el"
+    screen+="  ${faint}╭─────────────────────────────────╮${off}$el"
+    screen+="  ${faint}│${off}  ${bold}${green}droidtap${off}  tap Android's audio  ${faint}│${off}$el"
+    screen+="  ${faint}╰─────────────────────────────────╯${off}$el$el"
     if $running; then
-        screen+="   Android      ${green}●${off} running at ${cyan}$URL${off}$el"
+        screen+="   Android      ${green}●${off} running at ${cyan}$URL${off}$el$el"
     else
-        screen+="   Android      ${faint}○ not running${off}$el"
+        screen+="   Android      ${faint}○ not running${off}$el$el"
     fi
-    screen+="   Recordings   $recorded in ./recordings$el$el"
     for i in 0 1 2 3 4 5 6 7; do
         # Recording and stopping need a running Android.
         dim=''
@@ -284,11 +268,10 @@ draw_menu() {
             dim=$faint
         fi
         if [ $i -eq "$selected" ]; then
-            screen+=" ${green}❯${off} ${bold}${dim}${keys[i]}  $(printf '%-28s' "${labels[i]}")${off}"
+            screen+=" ${green}❯${off} ${bold}${dim}${keys[i]}  ${labels[i]}${off}$el"
         else
-            screen+="   ${faint}${keys[i]}${off}  ${dim}$(printf '%-28s' "${labels[i]}")${off}"
+            screen+="   ${faint}${keys[i]}${off}  ${dim}${labels[i]}${off}$el"
         fi
-        screen+="  ${faint}${hints[i]}${off}$el"
     done
     screen+="$el   $message$el$el"
     screen+="  ${faint}↑↓ move · enter choose · 1-7 or q directly${off}$el"

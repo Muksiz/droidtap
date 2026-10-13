@@ -72,39 +72,30 @@ cls
 :menu_draw
 call :android_running
 if errorlevel 1 (set "UP=") else (set "UP=1")
-set "COUNT=0"
-for %%f in (recordings\*.wav) do set /a COUNT+=1
 rem Recording and stopping need a running Android.
 if defined UP (
     set "STATE=%S_GREEN%●%S_OFF% running at %S_CYAN%%URL%%S_OFF%"
-    set "ITEM1=Open Android in the browser "
-    set "HINT1="
-    set "HINT2=until Ctrl+C"
-    set "HINT5=its apps and logins are kept"
+    set "ITEM1=Open Android in the browser"
     set "S_NEED="
 ) else (
     set "STATE=%S_DIM%○ not running%S_OFF%"
-    set "ITEM1=Start Android               "
-    set "HINT1=and open its screen in the browser"
-    set "HINT2=start Android first"
-    set "HINT5=it is not running"
+    set "ITEM1=Start Android"
     set "S_NEED=%S_DIM%"
 )
 echo %ESC%[H%EL%
-echo   %S_DIM%┌──────────────────────────────────────────────────────────┐%S_OFF%%EL%
-echo   %S_DIM%│%S_OFF%  %S_BOLD%%S_GREEN%droidtap%S_OFF%  records what Android plays, and nothing else  %S_DIM%│%S_OFF%%EL%
-echo   %S_DIM%└──────────────────────────────────────────────────────────┘%S_OFF%%EL%
+echo   %S_DIM%┌─────────────────────────────────┐%S_OFF%%EL%
+echo   %S_DIM%│%S_OFF%  %S_BOLD%%S_GREEN%droidtap%S_OFF%  tap Android's audio  %S_DIM%│%S_OFF%%EL%
+echo   %S_DIM%└─────────────────────────────────┘%S_OFF%%EL%
 echo.%EL%
 echo    Android      %STATE%%EL%
-echo    Recordings   %COUNT% in the folder recordings%EL%
 echo.%EL%
-echo    %S_BOLD%1%S_OFF%  %ITEM1%  %S_DIM%%HINT1%%S_OFF%%EL%
-echo    %S_BOLD%2%S_OFF%  %S_NEED%Record                      %S_OFF%  %S_DIM%%HINT2%%S_OFF%%EL%
-echo    %S_BOLD%3%S_OFF%  Listen to the recording       %S_DIM%while it is being made, with ffplay%S_OFF%%EL%
+echo    %S_BOLD%1%S_OFF%  %ITEM1%%EL%
+echo    %S_BOLD%2%S_OFF%  %S_NEED%Record%S_OFF%%EL%
+echo    %S_BOLD%3%S_OFF%  Listen to the recording%EL%
 echo    %S_BOLD%4%S_OFF%  Open the recordings folder%EL%
-echo    %S_BOLD%5%S_OFF%  %S_NEED%Stop Android                %S_OFF%  %S_DIM%%HINT5%%S_OFF%%EL%
+echo    %S_BOLD%5%S_OFF%  %S_NEED%Stop Android%S_OFF%%EL%
 echo    %S_BOLD%6%S_OFF%  Status and log%EL%
-echo    %S_BOLD%7%S_OFF%  Update                        %S_DIM%git pull, rebuild the containers%S_OFF%%EL%
+echo    %S_BOLD%7%S_OFF%  Update%EL%
 echo    %S_BOLD%q%S_OFF%  Quit%EL%
 echo.%EL%
 echo.   !MSG!%EL%
@@ -252,7 +243,7 @@ if not defined LISTEN_AT (
     echo %S_RED%Could not read%S_OFF% !LISTEN_FILE!
     exit /b 1
 )
-echo Listening to !LISTEN_FILE!, a second behind - press Ctrl+C to stop
+echo Listening to !LISTEN_FILE! - press Ctrl+C to stop
 rem The header's length is out of date, and the file's end is not the end.
 ffplay -nodisp -nostats -loglevel error -probesize 32 -analyzeduration 0 -follow 1 -ignore_length 1 -ss %LISTEN_AT% -i "!LISTEN_FILE!"
 exit /b
